@@ -52,7 +52,7 @@ if (-not $env:ADO_PAT) {
     exit 1
 }
 
-$baseUrl = "https://dev.azure.com/$AdoOrg/$AdoProject/_apis/build/definitions/$PipelineId?api-version=6.0"
+$baseUrl = "https://dev.azure.com/$AdoOrg/$AdoProject/_apis/build/definitions/$($PipelineId)?api-version=6.0"
 
 $headers = @{
     Authorization = "Basic " + [Convert]::ToBase64String(
