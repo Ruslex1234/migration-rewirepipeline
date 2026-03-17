@@ -1,0 +1,4 @@
+org,teamproject,repo,pipeline,pipeline_id,url,serviceConnection,github_org,github_repo,default_branch
+myorg,MyProject,my-classic-repo,my-classic-pipeline,,https://dev.azure.com/myorg/MyProject/_build?definitionId=123,00000000-0000-0000-0000-000000000000,my-github-org,my-classic-repo,main
+myorg,MyProject,another-repo,,456,https://dev.azure.com/myorg/MyProject/_build?definitionId=456,00000000-0000-0000-0000-000000000000,my-github-org,another-repo,main
+myorg,MyProject,third-repo,third-repo-build,,https://dev.azure.com/myorg/MyProject/_build?definitionId=789,00000000-0000-0000-0000-000000000000,my-github-org,third-repo,develop
