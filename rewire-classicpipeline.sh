@@ -14,22 +14,12 @@
 # USAGE
 #   export ADO_PAT="your-ado-pat"
 #
-#   # By pipeline name:
 #   ./rewire-classicpipeline.sh \
-#     --ado-org        my-ado-org \
-#     --ado-project    MyProject \
-#     --pipeline-name  "my-classic-pipeline" \
-#     --github-org     my-github-org \
-#     --github-repo    my-repo \
-#     --service-connection-id 8846673b-b6bc-4f7c-aeeb-6d7447b2334d
-#
-#   # By pipeline ID:
-#   ./rewire-classicpipeline.sh \
-#     --ado-org        my-ado-org \
-#     --ado-project    MyProject \
-#     --pipeline-id    42 \
-#     --github-org     my-github-org \
-#     --github-repo    my-repo \
+#     --ado-org               my-ado-org \
+#     --ado-project           MyProject \
+#     --pipeline-name         "my-classic-pipeline" \
+#     --github-org            my-github-org \
+#     --github-repo           my-repo \
 #     --service-connection-id 8846673b-b6bc-4f7c-aeeb-6d7447b2334d
 
 set -euo pipefail
@@ -47,7 +37,6 @@ warn() { echo "WARNING: $*" >&2; }
 ADO_ORG=""
 ADO_PROJECT=""
 PIPELINE_NAME=""
-PIPELINE_ID=""
 GITHUB_ORG=""
 GITHUB_REPO=""
 SERVICE_CONNECTION_ID=""
@@ -58,7 +47,6 @@ while [[ $# -gt 0 ]]; do
         --ado-org)                ADO_ORG="$2";                shift 2 ;;
         --ado-project)            ADO_PROJECT="$2";            shift 2 ;;
         --pipeline-name)          PIPELINE_NAME="$2";          shift 2 ;;
-        --pipeline-id)            PIPELINE_ID="$2";            shift 2 ;;
         --github-org)             GITHUB_ORG="$2";             shift 2 ;;
         --github-repo)            GITHUB_REPO="$2";            shift 2 ;;
         --service-connection-id)  SERVICE_CONNECTION_ID="$2";  shift 2 ;;
@@ -71,16 +59,10 @@ done
 # ── Validate required args ───────────────────────────────────────────────────
 [[ -n "$ADO_ORG" ]]               || err "--ado-org is required"
 [[ -n "$ADO_PROJECT" ]]           || err "--ado-project is required"
+[[ -n "$PIPELINE_NAME" ]]         || err "--pipeline-name is required"
 [[ -n "$GITHUB_ORG" ]]            || err "--github-org is required"
 [[ -n "$GITHUB_REPO" ]]           || err "--github-repo is required"
 [[ -n "$SERVICE_CONNECTION_ID" ]] || err "--service-connection-id is required"
-
-if [[ -n "$PIPELINE_NAME" && -n "$PIPELINE_ID" ]]; then
-    err "Provide either --pipeline-name or --pipeline-id, not both"
-fi
-if [[ -z "$PIPELINE_NAME" && -z "$PIPELINE_ID" ]]; then
-    err "One of --pipeline-name or --pipeline-id is required"
-fi
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
 [[ -n "${ADO_PAT:-}" ]] || err "ADO_PAT environment variable is not set"
@@ -89,30 +71,28 @@ AUTH_HEADER="Authorization: Basic $(printf ':%s' "$ADO_PAT" | base64 -w 0)"
 API_BASE="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis"
 
 # ── Resolve pipeline name to ID ──────────────────────────────────────────────
-if [[ -n "$PIPELINE_NAME" ]]; then
-    echo "Resolving pipeline name '${PIPELINE_NAME}' to ID..."
+echo "Resolving pipeline name '${PIPELINE_NAME}' to ID..."
 
-    ENCODED_NAME=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$PIPELINE_NAME")
-    LIST_URL="${API_BASE}/build/definitions?api-version=7.1&name=${ENCODED_NAME}"
+ENCODED_NAME=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$PIPELINE_NAME")
+LIST_URL="${API_BASE}/build/definitions?api-version=7.1&name=${ENCODED_NAME}"
 
-    LIST_JSON=$(curl -sf -H "$AUTH_HEADER" "$LIST_URL") \
-        || err "Failed to query pipeline list"
+LIST_JSON=$(curl -sf -H "$AUTH_HEADER" "$LIST_URL") \
+    || err "Failed to query pipeline list"
 
-    COUNT=$(echo "$LIST_JSON" | jq '.count')
+COUNT=$(echo "$LIST_JSON" | jq '.count')
 
-    if [[ "$COUNT" -eq 0 ]]; then
-        err "No pipeline found with name: '${PIPELINE_NAME}'"
-    fi
-
-    if [[ "$COUNT" -gt 1 ]]; then
-        warn "Multiple pipelines matched '${PIPELINE_NAME}':"
-        echo "$LIST_JSON" | jq -r '.value[] | "  ID: \(.id)  Name: \(.name)"' >&2
-        err "Provide a more specific name or use --pipeline-id instead"
-    fi
-
-    PIPELINE_ID=$(echo "$LIST_JSON" | jq -r '.value[0].id')
-    echo "  Resolved '${PIPELINE_NAME}' to pipeline ID: ${PIPELINE_ID}"
+if [[ "$COUNT" -eq 0 ]]; then
+    err "No pipeline found with name: '${PIPELINE_NAME}'"
 fi
+
+if [[ "$COUNT" -gt 1 ]]; then
+    warn "Multiple pipelines matched '${PIPELINE_NAME}':"
+    echo "$LIST_JSON" | jq -r '.value[] | "  ID: \(.id)  Name: \(.name)"' >&2
+    err "Provide a more specific pipeline name"
+fi
+
+PIPELINE_ID=$(echo "$LIST_JSON" | jq -r '.value[0].id')
+echo "  Resolved '${PIPELINE_NAME}' to pipeline ID: ${PIPELINE_ID}"
 
 # ── Fetch full pipeline definition ───────────────────────────────────────────
 DEF_URL="${API_BASE}/build/definitions/${PIPELINE_ID}?api-version=6.0"

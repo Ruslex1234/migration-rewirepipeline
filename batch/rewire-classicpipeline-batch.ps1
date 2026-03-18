@@ -41,8 +41,7 @@
 .CSV FORMAT (classic_pipeline.csv)
     Required columns : org, teamproject, repo, pipeline, serviceConnection,
                        github_org, github_repo
-    Optional columns : pipeline_id   (numeric ID; takes precedence over pipeline name)
-                       default_branch (defaults to "main")
+    Optional columns : default_branch (defaults to "main")
                        url            (informational only, from ado2gh inventory)
 #>
 
@@ -251,11 +250,10 @@ foreach ($row in $rows) {
     $GitHubOrg     = $row.github_org.Trim()
     $GitHubRepo    = $row.github_repo.Trim()
     $SvcConnId     = $row.serviceConnection.Trim()
-    $PipelineIdCsv = if ($CsvHeaders -contains "pipeline_id") { $row.pipeline_id.Trim() } else { "" }
     $DefaultBranch = if ($CsvHeaders -contains "default_branch" -and $row.default_branch.Trim()) {
                          $row.default_branch.Trim() } else { "main" }
 
-    $PipelineLabel = if ($PipelineIdCsv) { "'$PipelineName' (ID: $PipelineIdCsv)" } else { "'$PipelineName'" }
+    $PipelineLabel = "'$PipelineName'"
 
     Write-Host "`n   🔍 Checking: $PipelineLabel — repo: '$AdoRepo'" -ForegroundColor Gray
 
@@ -273,51 +271,46 @@ foreach ($row in $rows) {
     Write-Host "      GitHub : $GitHubOrg/$GitHubRepo (branch: $DefaultBranch)" -ForegroundColor Gray
     Write-Host "      Svc    : $SvcConnId" -ForegroundColor Gray
 
-    # Resolve pipeline name → ID if needed
-    $ResolvedId = 0
-    if ($PipelineIdCsv) {
-        $ResolvedId = [int]$PipelineIdCsv
-    } else {
-        Write-Host "      Resolving pipeline name to ID..." -ForegroundColor Gray
-        $headers = @{
-            Authorization = "Basic " + [Convert]::ToBase64String(
-                [Text.Encoding]::ASCII.GetBytes(":$($env:ADO_PAT)")
-            )
-        }
-        $encodedName = [Uri]::EscapeDataString($PipelineName)
-        $listUrl = "https://dev.azure.com/$AdoOrg/$AdoProject/_apis/build/definitions?api-version=7.1&name=$encodedName"
-
-        try {
-            $list = Invoke-RestMethod -Method GET -Uri $listUrl -Headers $headers
-        } catch {
-            $FailureCount++
-            $err = "Failed to query pipeline list for '$PipelineName': $_"
-            Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
-            $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
-            $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
-            continue
-        }
-
-        if ($list.count -eq 0) {
-            $FailureCount++
-            $err = "No pipeline found with name '$PipelineName'"
-            Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
-            $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
-            $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
-            continue
-        }
-        if ($list.count -gt 1) {
-            $FailureCount++
-            $err = "Multiple pipelines matched '$PipelineName' — add pipeline_id column to disambiguate"
-            Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
-            $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
-            $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
-            continue
-        }
-
-        $ResolvedId = $list.value[0].id
-        Write-Host "      Resolved to pipeline ID: $ResolvedId" -ForegroundColor Gray
+    # Resolve pipeline name to ID
+    Write-Host "      Resolving pipeline name to ID..." -ForegroundColor Gray
+    $headers = @{
+        Authorization = "Basic " + [Convert]::ToBase64String(
+            [Text.Encoding]::ASCII.GetBytes(":$($env:ADO_PAT)")
+        )
     }
+    $encodedName = [Uri]::EscapeDataString($PipelineName)
+    $listUrl = "https://dev.azure.com/$AdoOrg/$AdoProject/_apis/build/definitions?api-version=7.1&name=$encodedName"
+
+    try {
+        $list = Invoke-RestMethod -Method GET -Uri $listUrl -Headers $headers
+    } catch {
+        $FailureCount++
+        $err = "Failed to query pipeline list for '$PipelineName': $_"
+        Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
+        $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
+        $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
+        continue
+    }
+
+    if ($list.count -eq 0) {
+        $FailureCount++
+        $err = "No pipeline found with name '$PipelineName'"
+        Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
+        $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
+        $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
+        continue
+    }
+    if ($list.count -gt 1) {
+        $FailureCount++
+        $err = "Multiple pipelines matched '$PipelineName' — use a more specific pipeline name"
+        Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
+        $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
+        $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
+        continue
+    }
+
+    $ResolvedId = $list.value[0].id
+    Write-Host "      Resolved to pipeline ID: $ResolvedId" -ForegroundColor Gray
 
     # Rewire
     try {

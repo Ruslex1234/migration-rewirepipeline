@@ -35,8 +35,7 @@ set -euo pipefail
 # CSV FORMAT (classic_pipeline.csv)
 #   Required columns : org, teamproject, repo, pipeline, serviceConnection,
 #                      github_org, github_repo
-#   Optional columns : pipeline_id  (numeric ID; takes precedence over pipeline name)
-#                      default_branch (defaults to "main")
+#   Optional columns : default_branch (defaults to "main")
 #                      url            (informational only, from ado2gh inventory)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -286,22 +285,13 @@ while IFS= read -r line; do
     SERVICE_CONN_ID="${fields[${COL_INDEX["serviceConnection"]}]:-}"
 
     # Optional columns
-    PIPELINE_ID_CSV=""
-    if [[ -n "${COL_INDEX["pipeline_id"]+x}" ]]; then
-        PIPELINE_ID_CSV="${fields[${COL_INDEX["pipeline_id"]}]:-}"
-    fi
     DEFAULT_BRANCH="main"
     if [[ -n "${COL_INDEX["default_branch"]+x}" ]]; then
         val="${fields[${COL_INDEX["default_branch"]}]:-}"
         [[ -n "$val" ]] && DEFAULT_BRANCH="$val"
     fi
 
-    # Human-readable label for logs
-    if [[ -n "$PIPELINE_ID_CSV" ]]; then
-        PIPELINE_LABEL="'${PIPELINE_NAME}' (ID: ${PIPELINE_ID_CSV})"
-    else
-        PIPELINE_LABEL="'${PIPELINE_NAME}'"
-    fi
+    PIPELINE_LABEL="'${PIPELINE_NAME}'"
 
     echo -e "\n${GRAY}   🔍 Checking: ${PIPELINE_LABEL} — repo: '${ADO_REPO}'${NC}"
 
@@ -319,44 +309,41 @@ while IFS= read -r line; do
     echo -e "${GRAY}      GitHub: ${GITHUB_ORG}/${GITHUB_REPO} (branch: ${DEFAULT_BRANCH})${NC}"
     echo -e "${GRAY}      Svc:    ${SERVICE_CONN_ID}${NC}"
 
-    # Resolve name → ID if pipeline_id not supplied
-    RESOLVED_ID="$PIPELINE_ID_CSV"
-    if [[ -z "$RESOLVED_ID" ]]; then
-        echo -e "${GRAY}      Resolving pipeline name to ID...${NC}"
-        AUTH_HEADER="Authorization: Basic $(printf ':%s' "$ADO_PAT" | base64 -w 0)"
-        ENCODED=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$PIPELINE_NAME")
-        LIST_URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/build/definitions?api-version=7.1&name=${ENCODED}"
+    # Resolve pipeline name to ID
+    echo -e "${GRAY}      Resolving pipeline name to ID...${NC}"
+    AUTH_HEADER="Authorization: Basic $(printf ':%s' "$ADO_PAT" | base64 -w 0)"
+    ENCODED=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$PIPELINE_NAME")
+    LIST_URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/build/definitions?api-version=7.1&name=${ENCODED}"
 
-        LIST_JSON=$(curl -sf -H "$AUTH_HEADER" "$LIST_URL" 2>/dev/null) || {
-            FAILURE_COUNT=$((FAILURE_COUNT + 1))
-            ERR="Failed to query pipeline list for '${PIPELINE_NAME}'"
-            echo -e "${RED}      ❌ FAILED: $ERR${NC}"
-            RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
-            FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
-            continue
-        }
+    LIST_JSON=$(curl -sf -H "$AUTH_HEADER" "$LIST_URL" 2>/dev/null) || {
+        FAILURE_COUNT=$((FAILURE_COUNT + 1))
+        ERR="Failed to query pipeline list for '${PIPELINE_NAME}'"
+        echo -e "${RED}      ❌ FAILED: $ERR${NC}"
+        RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
+        FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
+        continue
+    }
 
-        COUNT=$(echo "$LIST_JSON" | jq '.count')
-        if [[ "$COUNT" -eq 0 ]]; then
-            FAILURE_COUNT=$((FAILURE_COUNT + 1))
-            ERR="No pipeline found with name '${PIPELINE_NAME}'"
-            echo -e "${RED}      ❌ FAILED: $ERR${NC}"
-            RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
-            FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
-            continue
-        fi
-        if [[ "$COUNT" -gt 1 ]]; then
-            FAILURE_COUNT=$((FAILURE_COUNT + 1))
-            ERR="Multiple pipelines matched '${PIPELINE_NAME}' — add pipeline_id column to disambiguate"
-            echo -e "${RED}      ❌ FAILED: $ERR${NC}"
-            RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
-            FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
-            continue
-        fi
-
-        RESOLVED_ID=$(echo "$LIST_JSON" | jq -r '.value[0].id')
-        echo -e "${GRAY}      Resolved to pipeline ID: ${RESOLVED_ID}${NC}"
+    COUNT=$(echo "$LIST_JSON" | jq '.count')
+    if [[ "$COUNT" -eq 0 ]]; then
+        FAILURE_COUNT=$((FAILURE_COUNT + 1))
+        ERR="No pipeline found with name '${PIPELINE_NAME}'"
+        echo -e "${RED}      ❌ FAILED: $ERR${NC}"
+        RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
+        FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
+        continue
     fi
+    if [[ "$COUNT" -gt 1 ]]; then
+        FAILURE_COUNT=$((FAILURE_COUNT + 1))
+        ERR="Multiple pipelines matched '${PIPELINE_NAME}' — use a more specific pipeline name"
+        echo -e "${RED}      ❌ FAILED: $ERR${NC}"
+        RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
+        FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
+        continue
+    fi
+
+    RESOLVED_ID=$(echo "$LIST_JSON" | jq -r '.value[0].id')
+    echo -e "${GRAY}      Resolved to pipeline ID: ${RESOLVED_ID}${NC}"
 
     # Rewire
     TMP_OUT=$(mktemp)
