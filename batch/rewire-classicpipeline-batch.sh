@@ -9,6 +9,12 @@ set -euo pipefail
 #   (process type 1) pipeline to its corresponding GitHub repository via the
 #   Azure DevOps REST API.
 #
+#   For every pipeline the script will:
+#     1. Resolve the pipeline name to an ID (skipped when pipeline_id is set)
+#     2. Fetch the pipeline definition and validate it is a classic pipeline
+#     3. Skip with a clear message if it is a YAML pipeline (process.type = 2)
+#     4. Rewire the repository section to point to GitHub
+#
 #   If repos_with_status.csv is present (Stage 3 output from the migration
 #   pipeline), only pipelines whose ADO repo migrated successfully are
 #   processed; all others are skipped with a warning.
@@ -35,7 +41,8 @@ set -euo pipefail
 # CSV FORMAT (classic_pipeline.csv)
 #   Required columns : org, teamproject, repo, pipeline, serviceConnection,
 #                      github_org, github_repo
-#   Optional columns : default_branch (defaults to "main")
+#   Optional columns : pipeline_id    (numeric ID; when provided, skips name lookup)
+#                      default_branch (defaults to "main")
 #                      url            (informational only, from ado2gh inventory)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -94,7 +101,8 @@ load_migrated_repos() {
 }
 
 # ── Core rewiring function ─────────────────────────────────────────────────────
-# Returns 0=success, 1=error, 2=skipped (YAML pipeline)
+# Accepts a pre-fetched definition JSON to avoid a redundant API call.
+# Returns 0=success, 1=error
 rewire_classic_pipeline() {
     local ado_org="$1"
     local ado_project="$2"
@@ -103,20 +111,10 @@ rewire_classic_pipeline() {
     local github_repo="$5"
     local service_conn_id="$6"
     local default_branch="$7"
+    local definition="$8"   # pre-fetched definition JSON
 
     local auth_header="Authorization: Basic $(printf ':%s' "$ADO_PAT" | base64 -w 0)"
     local def_url="https://dev.azure.com/${ado_org}/${ado_project}/_apis/build/definitions/${pipeline_id}?api-version=6.0"
-
-    local definition
-    definition=$(curl -sf -H "$auth_header" "$def_url") || return 1
-
-    local process_type
-    process_type=$(echo "$definition" | jq -r '.process.type')
-
-    if [[ "$process_type" -ne 1 ]]; then
-        echo "Process type $process_type detected (YAML) — use gh ado2gh rewire-pipeline for YAML pipelines"
-        return 2
-    fi
 
     local updated_definition
     updated_definition=$(echo "$definition" | jq \
@@ -202,6 +200,7 @@ fi
 PIPELINE_COUNT=$(( $(wc -l < "$CSV_FILE") - 1 ))
 if [[ "$PIPELINE_COUNT" -le 0 ]]; then
     echo -e "${YELLOW}⚠️  No pipelines found in CSV (only header or empty file)${NC}"
+    echo -e "${GRAY}   Add pipeline rows to classic_pipeline.csv and re-run${NC}"
     exit 0
 fi
 echo -e "${GREEN}✅ File loaded: $PIPELINE_COUNT pipeline(s) found${NC}"
@@ -268,7 +267,7 @@ fi
 echo -e "${GREEN}✅ All service connection IDs validated${NC}"
 
 # ── Step 4: Rewire pipelines ──────────────────────────────────────────────────
-echo -e "\n${YELLOW}[Step 4/4] Rewiring classic pipelines to GitHub...${NC}"
+echo -e "\n${YELLOW}[Step 4/4] Processing classic pipelines...${NC}"
 
 while IFS= read -r line; do
     IFS=',' read -ra fields <<< "$line"
@@ -285,13 +284,21 @@ while IFS= read -r line; do
     SERVICE_CONN_ID="${fields[${COL_INDEX["serviceConnection"]}]:-}"
 
     # Optional columns
+    PIPELINE_ID_CSV=""
+    if [[ -n "${COL_INDEX["pipeline_id"]+x}" ]]; then
+        PIPELINE_ID_CSV="${fields[${COL_INDEX["pipeline_id"]}]:-}"
+    fi
     DEFAULT_BRANCH="main"
     if [[ -n "${COL_INDEX["default_branch"]+x}" ]]; then
         val="${fields[${COL_INDEX["default_branch"]}]:-}"
         [[ -n "$val" ]] && DEFAULT_BRANCH="$val"
     fi
 
-    PIPELINE_LABEL="'${PIPELINE_NAME}'"
+    if [[ -n "$PIPELINE_ID_CSV" ]]; then
+        PIPELINE_LABEL="'${PIPELINE_NAME}' (ID: ${PIPELINE_ID_CSV})"
+    else
+        PIPELINE_LABEL="'${PIPELINE_NAME}'"
+    fi
 
     echo -e "\n${GRAY}   🔍 Checking: ${PIPELINE_LABEL} — repo: '${ADO_REPO}'${NC}"
 
@@ -309,60 +316,92 @@ while IFS= read -r line; do
     echo -e "${GRAY}      GitHub: ${GITHUB_ORG}/${GITHUB_REPO} (branch: ${DEFAULT_BRANCH})${NC}"
     echo -e "${GRAY}      Svc:    ${SERVICE_CONN_ID}${NC}"
 
-    # Resolve pipeline name to ID
-    echo -e "${GRAY}      Resolving pipeline name to ID...${NC}"
-    AUTH_HEADER="Authorization: Basic $(printf ':%s' "$ADO_PAT" | base64 -w 0)"
-    ENCODED=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$PIPELINE_NAME")
-    LIST_URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/build/definitions?api-version=7.1&name=${ENCODED}"
+    # ── Resolve pipeline name to ID (skipped when pipeline_id is provided) ────
+    RESOLVED_ID="$PIPELINE_ID_CSV"
+    if [[ -z "$RESOLVED_ID" ]]; then
+        echo -e "${GRAY}      Resolving pipeline name to ID...${NC}"
+        AUTH_HEADER="Authorization: Basic $(printf ':%s' "$ADO_PAT" | base64 -w 0)"
+        ENCODED=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$PIPELINE_NAME")
+        LIST_URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/build/definitions?api-version=7.1&name=${ENCODED}"
 
-    LIST_JSON=$(curl -sf -H "$AUTH_HEADER" "$LIST_URL" 2>/dev/null) || {
+        LIST_JSON=$(curl -sf -H "$AUTH_HEADER" "$LIST_URL" 2>/dev/null) || {
+            FAILURE_COUNT=$((FAILURE_COUNT + 1))
+            ERR="Failed to query pipeline list for '${PIPELINE_NAME}'"
+            echo -e "${RED}      ❌ FAILED: $ERR${NC}"
+            RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
+            FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
+            continue
+        }
+
+        COUNT=$(echo "$LIST_JSON" | jq '.count')
+        if [[ "$COUNT" -eq 0 ]]; then
+            FAILURE_COUNT=$((FAILURE_COUNT + 1))
+            ERR="No pipeline found with name '${PIPELINE_NAME}'"
+            echo -e "${RED}      ❌ FAILED: $ERR${NC}"
+            RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
+            FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
+            continue
+        fi
+        if [[ "$COUNT" -gt 1 ]]; then
+            FAILURE_COUNT=$((FAILURE_COUNT + 1))
+            ERR="Multiple pipelines matched '${PIPELINE_NAME}' — use a more specific name or add the pipeline_id column"
+            echo -e "${RED}      ❌ FAILED: $ERR${NC}"
+            RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
+            FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
+            continue
+        fi
+
+        RESOLVED_ID=$(echo "$LIST_JSON" | jq -r '.value[0].id')
+        echo -e "${GRAY}      Resolved to pipeline ID: ${RESOLVED_ID}${NC}"
+    fi
+
+    # ── Fetch definition and validate pipeline type ───────────────────────────
+    echo -e "${GRAY}      Fetching pipeline definition (ID: ${RESOLVED_ID})...${NC}"
+    AUTH_HEADER="Authorization: Basic $(printf ':%s' "$ADO_PAT" | base64 -w 0)"
+    DEF_URL="https://dev.azure.com/${ADO_ORG}/${ADO_PROJECT}/_apis/build/definitions/${RESOLVED_ID}?api-version=6.0"
+
+    DEFINITION=$(curl -sf -H "$AUTH_HEADER" "$DEF_URL" 2>/dev/null) || {
         FAILURE_COUNT=$((FAILURE_COUNT + 1))
-        ERR="Failed to query pipeline list for '${PIPELINE_NAME}'"
+        ERR="Failed to fetch pipeline definition (ID: ${RESOLVED_ID})"
         echo -e "${RED}      ❌ FAILED: $ERR${NC}"
         RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
         FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
         continue
     }
 
-    COUNT=$(echo "$LIST_JSON" | jq '.count')
-    if [[ "$COUNT" -eq 0 ]]; then
-        FAILURE_COUNT=$((FAILURE_COUNT + 1))
-        ERR="No pipeline found with name '${PIPELINE_NAME}'"
-        echo -e "${RED}      ❌ FAILED: $ERR${NC}"
-        RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
-        FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
+    PROCESS_TYPE=$(echo "$DEFINITION" | jq -r '.process.type')
+
+    if [[ "$PROCESS_TYPE" == "2" ]]; then
+        SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+        echo -e "${YELLOW}      ⏭️  SKIPPED — '${PIPELINE_NAME}' is a YAML pipeline (process.type=2), not a classic pipeline${NC}"
+        echo -e "${GRAY}         To rewire YAML pipelines use: gh ado2gh rewire-pipeline${NC}"
+        SKIPPED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: YAML pipeline (process.type=2) — use gh ado2gh rewire-pipeline")
+        RESULTS+=("⏭️  SKIPPED (YAML, not classic) | $ADO_PROJECT/${PIPELINE_LABEL}")
         continue
-    fi
-    if [[ "$COUNT" -gt 1 ]]; then
-        FAILURE_COUNT=$((FAILURE_COUNT + 1))
-        ERR="Multiple pipelines matched '${PIPELINE_NAME}' — use a more specific pipeline name"
-        echo -e "${RED}      ❌ FAILED: $ERR${NC}"
-        RESULTS+=("❌ FAILED | $ADO_PROJECT/${PIPELINE_LABEL}")
-        FAILED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: $ERR")
+    elif [[ "$PROCESS_TYPE" != "1" ]]; then
+        SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+        echo -e "${YELLOW}      ⏭️  SKIPPED — '${PIPELINE_NAME}' has unknown process type (process.type=${PROCESS_TYPE})${NC}"
+        SKIPPED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: Unknown process type (${PROCESS_TYPE})")
+        RESULTS+=("⏭️  SKIPPED (unknown type=${PROCESS_TYPE}) | $ADO_PROJECT/${PIPELINE_LABEL}")
         continue
     fi
 
-    RESOLVED_ID=$(echo "$LIST_JSON" | jq -r '.value[0].id')
-    echo -e "${GRAY}      Resolved to pipeline ID: ${RESOLVED_ID}${NC}"
+    echo -e "${GRAY}      Pipeline type: Classic (process.type=1) ✓${NC}"
 
-    # Rewire
+    # ── Rewire using the already-fetched definition ───────────────────────────
     TMP_OUT=$(mktemp)
     EXIT_CODE=0
     rewire_classic_pipeline \
         "$ADO_ORG" "$ADO_PROJECT" "$RESOLVED_ID" \
         "$GITHUB_ORG" "$GITHUB_REPO" "$SERVICE_CONN_ID" "$DEFAULT_BRANCH" \
+        "$DEFINITION" \
         >"$TMP_OUT" 2>&1 || EXIT_CODE=$?
 
     OUT_CONTENT=$(cat "$TMP_OUT")
     rm -f "$TMP_OUT"
     [[ -n "$OUT_CONTENT" ]] && echo "$OUT_CONTENT" | sed 's/^/      /' | tee -a "$DETAILED_LOG"
 
-    if [[ "$EXIT_CODE" -eq 2 ]]; then
-        SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
-        echo -e "${YELLOW}      ⏭️  SKIPPED (YAML pipeline)${NC}"
-        SKIPPED_DETAILS+=("$ADO_PROJECT/${PIPELINE_LABEL}: YAML pipeline — use gh ado2gh rewire-pipeline instead")
-        RESULTS+=("⏭️  SKIPPED (YAML) | $ADO_PROJECT/${PIPELINE_LABEL}")
-    elif [[ "$EXIT_CODE" -eq 0 ]]; then
+    if [[ "$EXIT_CODE" -eq 0 ]]; then
         SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
         echo -e "${GREEN}      ✅ SUCCESS${NC}"
         RESULTS+=("✅ SUCCESS | $ADO_PROJECT/${PIPELINE_LABEL} → ${GITHUB_ORG}/${GITHUB_REPO}")

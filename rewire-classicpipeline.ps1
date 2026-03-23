@@ -16,10 +16,20 @@ definition. This avoids the `settingsSourceType=2` issue caused by
 .USAGE
 $env:ADO_PAT = "your-ado-pat"
 
+# By pipeline name:
 .\Rewire-ClassicPipeline.ps1 `
   -AdoOrg              my-ado-org `
   -AdoProject          MyProject `
   -AdoPipelineName     "my-classic-pipeline" `
+  -GitHubOrg           my-github-org `
+  -GitHubRepo          my-repo `
+  -ServiceConnectionId 8846673b-b6bc-4f7c-aeeb-6d7447b2334d
+
+# By pipeline ID:
+.\Rewire-ClassicPipeline.ps1 `
+  -AdoOrg              my-ado-org `
+  -AdoProject          MyProject `
+  -AdoPipelineId       42 `
   -GitHubOrg           my-github-org `
   -GitHubRepo          my-repo `
   -ServiceConnectionId 8846673b-b6bc-4f7c-aeeb-6d7447b2334d
@@ -32,8 +42,12 @@ param (
     [Parameter(Mandatory)]
     [string]$AdoProject,
 
-    [Parameter(Mandatory)]
+    # Accept name OR id — provide exactly one
+    [Parameter(Mandatory, ParameterSetName = "ByName")]
     [string]$AdoPipelineName,
+
+    [Parameter(Mandatory, ParameterSetName = "ById")]
+    [int]$AdoPipelineId,
 
     [Parameter(Mandatory)]
     [string]$GitHubOrg,
@@ -62,29 +76,31 @@ $headers = @{
 $apiBase = "https://dev.azure.com/$AdoOrg/$AdoProject/_apis"
 
 # ── Resolve pipeline name to ID ─────────────────────────────────────────────
-Write-Host "Resolving pipeline name '$AdoPipelineName' to ID..."
-$listUrl = "$apiBase/build/definitions?api-version=7.1&name=$([Uri]::EscapeDataString($AdoPipelineName))"
-try {
-    $list = Invoke-RestMethod -Method GET -Uri $listUrl -Headers $headers
-}
-catch {
-    Write-Error "Failed to query pipeline list"
-    throw
-}
+if ($PSCmdlet.ParameterSetName -eq "ByName") {
+    Write-Host "Resolving pipeline name '$AdoPipelineName' to ID..."
+    $listUrl = "$apiBase/build/definitions?api-version=7.1&name=$([Uri]::EscapeDataString($AdoPipelineName))"
+    try {
+        $list = Invoke-RestMethod -Method GET -Uri $listUrl -Headers $headers
+    }
+    catch {
+        Write-Error "Failed to query pipeline list"
+        throw
+    }
 
-if ($list.count -eq 0) {
-    Write-Error "No pipeline found with name: '$AdoPipelineName'"
-    exit 1
-}
-if ($list.count -gt 1) {
-    Write-Warning "Multiple pipelines matched '$AdoPipelineName':"
-    $list.value | ForEach-Object { Write-Warning "  ID: $($_.id)  Name: $($_.name)" }
-    Write-Error "Provide a more specific pipeline name"
-    exit 1
-}
+    if ($list.count -eq 0) {
+        Write-Error "No pipeline found with name: '$AdoPipelineName'"
+        exit 1
+    }
+    if ($list.count -gt 1) {
+        Write-Warning "Multiple pipelines matched '$AdoPipelineName':"
+        $list.value | ForEach-Object { Write-Warning "  ID: $($_.id)  Name: $($_.name)" }
+        Write-Error "Provide a more specific pipeline name or use -AdoPipelineId"
+        exit 1
+    }
 
-$AdoPipelineId = $list.value[0].id
-Write-Host "  Resolved '$AdoPipelineName' to pipeline ID: $AdoPipelineId"
+    $AdoPipelineId = $list.value[0].id
+    Write-Host "  Resolved '$AdoPipelineName' to pipeline ID: $AdoPipelineId"
+}
 
 # ── Fetch full pipeline definition ──────────────────────────────────────────
 $defUrl = "$apiBase/build/definitions/$($AdoPipelineId)?api-version=6.0"
