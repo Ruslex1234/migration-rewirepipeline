@@ -7,6 +7,12 @@
     (process type 1) pipeline to its corresponding GitHub repository via the
     Azure DevOps REST API.
 
+    For every pipeline the script will:
+      1. Resolve the pipeline name to an ID (skipped when pipeline_id is set)
+      2. Fetch the pipeline definition and validate it is a classic pipeline
+      3. Skip with a clear message if it is a YAML pipeline (process.type = 2)
+      4. Rewire the repository section to point to GitHub
+
     If repos_with_status.csv is present (Stage 3 output from the migration
     pipeline), only pipelines whose ADO repo migrated successfully are
     processed; all others are skipped with a warning.
@@ -41,7 +47,8 @@
 .CSV FORMAT (classic_pipeline.csv)
     Required columns : org, teamproject, repo, pipeline, serviceConnection,
                        github_org, github_repo
-    Optional columns : default_branch (defaults to "main")
+    Optional columns : pipeline_id    (numeric ID; when provided, skips name lookup)
+                       default_branch (defaults to "main")
                        url            (informational only, from ado2gh inventory)
 #>
 
@@ -93,7 +100,7 @@ function Load-MigratedRepos {
 }
 
 # ── Core rewiring function ────────────────────────────────────────────────────
-# Returns: "success" | "skipped-yaml" | throws on error
+# Accepts a pre-fetched definition object to avoid a redundant API call.
 function Invoke-RewireClassicPipeline {
     param (
         [string]$AdoOrg,
@@ -102,7 +109,8 @@ function Invoke-RewireClassicPipeline {
         [string]$GitHubOrg,
         [string]$GitHubRepo,
         [string]$ServiceConnectionId,
-        [string]$DefaultBranch
+        [string]$DefaultBranch,
+        [object]$Definition    # pre-fetched definition object
     )
 
     $headers = @{
@@ -112,14 +120,8 @@ function Invoke-RewireClassicPipeline {
     }
 
     $defUrl = "https://dev.azure.com/$AdoOrg/$AdoProject/_apis/build/definitions/$($PipelineId)?api-version=6.0"
-    $definition = Invoke-RestMethod -Method GET -Uri $defUrl -Headers $headers
 
-    $processType = $definition.process.type
-    if ($processType -ne 1) {
-        return "skipped-yaml"
-    }
-
-    $definition.repository = [PSCustomObject]@{
+    $Definition.repository = [PSCustomObject]@{
         properties = [PSCustomObject]@{
             apiUrl             = "https://api.github.com/repos/$GitHubOrg/$GitHubRepo"
             branchesUrl        = "https://api.github.com/repos/$GitHubOrg/$GitHubRepo/branches"
@@ -143,11 +145,9 @@ function Invoke-RewireClassicPipeline {
         checkoutSubmodules   = "false"
     }
 
-    $jsonBody = $definition | ConvertTo-Json -Depth 20
+    $jsonBody = $Definition | ConvertTo-Json -Depth 20
     Invoke-RestMethod -Method PUT -Uri $defUrl -Headers $headers `
         -ContentType "application/json" -Body $jsonBody | Out-Null
-
-    return "success"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -198,6 +198,7 @@ $rows = Import-Csv $CsvFile
 $PipelineCount = $rows.Count
 if ($PipelineCount -eq 0) {
     Write-Host "⚠️  No pipelines found in CSV (only header or empty file)" -ForegroundColor Yellow
+    Write-Host "   Add pipeline rows to classic_pipeline.csv and re-run" -ForegroundColor Gray
     exit 0
 }
 Write-Host "✅ File loaded: $PipelineCount pipeline(s) found" -ForegroundColor Green
@@ -239,8 +240,14 @@ if ($InvalidRows.Count -gt 0) {
 }
 Write-Host "✅ All service connection IDs validated" -ForegroundColor Green
 
-# ── Step 4: Rewire pipelines ──────────────────────────────────────────────────
-Write-Host "`n[Step 4/4] Rewiring classic pipelines to GitHub..." -ForegroundColor Yellow
+# ── Step 4: Process pipelines ──────────────────────────────────────────────────
+Write-Host "`n[Step 4/4] Processing classic pipelines..." -ForegroundColor Yellow
+
+$authHeaders = @{
+    Authorization = "Basic " + [Convert]::ToBase64String(
+        [Text.Encoding]::ASCII.GetBytes(":$($env:ADO_PAT)")
+    )
+}
 
 foreach ($row in $rows) {
     $AdoOrg        = $row.org.Trim()
@@ -250,10 +257,11 @@ foreach ($row in $rows) {
     $GitHubOrg     = $row.github_org.Trim()
     $GitHubRepo    = $row.github_repo.Trim()
     $SvcConnId     = $row.serviceConnection.Trim()
+    $PipelineIdCsv = if ($CsvHeaders -contains "pipeline_id") { $row.pipeline_id.Trim() } else { "" }
     $DefaultBranch = if ($CsvHeaders -contains "default_branch" -and $row.default_branch.Trim()) {
                          $row.default_branch.Trim() } else { "main" }
 
-    $PipelineLabel = "'$PipelineName'"
+    $PipelineLabel = if ($PipelineIdCsv) { "'$PipelineName' (ID: $PipelineIdCsv)" } else { "'$PipelineName'" }
 
     Write-Host "`n   🔍 Checking: $PipelineLabel — repo: '$AdoRepo'" -ForegroundColor Gray
 
@@ -271,68 +279,96 @@ foreach ($row in $rows) {
     Write-Host "      GitHub : $GitHubOrg/$GitHubRepo (branch: $DefaultBranch)" -ForegroundColor Gray
     Write-Host "      Svc    : $SvcConnId" -ForegroundColor Gray
 
-    # Resolve pipeline name to ID
-    Write-Host "      Resolving pipeline name to ID..." -ForegroundColor Gray
-    $headers = @{
-        Authorization = "Basic " + [Convert]::ToBase64String(
-            [Text.Encoding]::ASCII.GetBytes(":$($env:ADO_PAT)")
-        )
+    # ── Resolve pipeline name to ID (skipped when pipeline_id is provided) ────
+    $ResolvedId = 0
+    if ($PipelineIdCsv) {
+        $ResolvedId = [int]$PipelineIdCsv
+    } else {
+        Write-Host "      Resolving pipeline name to ID..." -ForegroundColor Gray
+        $encodedName = [Uri]::EscapeDataString($PipelineName)
+        $listUrl = "https://dev.azure.com/$AdoOrg/$AdoProject/_apis/build/definitions?api-version=7.1&name=$encodedName"
+
+        try {
+            $list = Invoke-RestMethod -Method GET -Uri $listUrl -Headers $authHeaders
+        } catch {
+            $FailureCount++
+            $err = "Failed to query pipeline list for '$PipelineName': $_"
+            Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
+            $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
+            $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
+            continue
+        }
+
+        if ($list.count -eq 0) {
+            $FailureCount++
+            $err = "No pipeline found with name '$PipelineName'"
+            Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
+            $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
+            $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
+            continue
+        }
+        if ($list.count -gt 1) {
+            $FailureCount++
+            $err = "Multiple pipelines matched '$PipelineName' — use a more specific name or add the pipeline_id column"
+            Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
+            $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
+            $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
+            continue
+        }
+
+        $ResolvedId = $list.value[0].id
+        Write-Host "      Resolved to pipeline ID: $ResolvedId" -ForegroundColor Gray
     }
-    $encodedName = [Uri]::EscapeDataString($PipelineName)
-    $listUrl = "https://dev.azure.com/$AdoOrg/$AdoProject/_apis/build/definitions?api-version=7.1&name=$encodedName"
+
+    # ── Fetch definition and validate pipeline type ───────────────────────────
+    Write-Host "      Fetching pipeline definition (ID: $ResolvedId)..." -ForegroundColor Gray
+    $defUrl = "https://dev.azure.com/$AdoOrg/$AdoProject/_apis/build/definitions/$($ResolvedId)?api-version=6.0"
 
     try {
-        $list = Invoke-RestMethod -Method GET -Uri $listUrl -Headers $headers
+        $definition = Invoke-RestMethod -Method GET -Uri $defUrl -Headers $authHeaders
     } catch {
         $FailureCount++
-        $err = "Failed to query pipeline list for '$PipelineName': $_"
+        $err = "Failed to fetch pipeline definition (ID: $ResolvedId): $_"
         Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
         $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
         $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
         continue
     }
 
-    if ($list.count -eq 0) {
-        $FailureCount++
-        $err = "No pipeline found with name '$PipelineName'"
-        Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
-        $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
-        $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
+    $processType = $definition.process.type
+
+    if ($processType -eq 2) {
+        $SkippedCount++
+        Write-Host "      ⏭️  SKIPPED — '$PipelineName' is a YAML pipeline (process.type=2), not a classic pipeline" -ForegroundColor Yellow
+        Write-Host "         To rewire YAML pipelines use: gh ado2gh rewire-pipeline" -ForegroundColor Gray
+        $SkippedDetails.Add("$AdoProject/$PipelineLabel : YAML pipeline (process.type=2) — use gh ado2gh rewire-pipeline")
+        $Results.Add("⏭️  SKIPPED (YAML, not classic) | $AdoProject/$PipelineLabel")
         continue
-    }
-    if ($list.count -gt 1) {
-        $FailureCount++
-        $err = "Multiple pipelines matched '$PipelineName' — use a more specific pipeline name"
-        Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
-        $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
-        $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
+    } elseif ($processType -ne 1) {
+        $SkippedCount++
+        Write-Host "      ⏭️  SKIPPED — '$PipelineName' has unknown process type (process.type=$processType)" -ForegroundColor Yellow
+        $SkippedDetails.Add("$AdoProject/$PipelineLabel : Unknown process type ($processType)")
+        $Results.Add("⏭️  SKIPPED (unknown type=$processType) | $AdoProject/$PipelineLabel")
         continue
     }
 
-    $ResolvedId = $list.value[0].id
-    Write-Host "      Resolved to pipeline ID: $ResolvedId" -ForegroundColor Gray
+    Write-Host "      Pipeline type: Classic (process.type=1) ✓" -ForegroundColor Gray
 
-    # Rewire
+    # ── Rewire using the already-fetched definition ───────────────────────────
     try {
-        $outcome = Invoke-RewireClassicPipeline `
+        Invoke-RewireClassicPipeline `
             -AdoOrg            $AdoOrg `
             -AdoProject        $AdoProject `
             -PipelineId        $ResolvedId `
             -GitHubOrg         $GitHubOrg `
             -GitHubRepo        $GitHubRepo `
             -ServiceConnectionId $SvcConnId `
-            -DefaultBranch     $DefaultBranch
+            -DefaultBranch     $DefaultBranch `
+            -Definition        $definition
 
-        if ($outcome -eq "skipped-yaml") {
-            $SkippedCount++
-            Write-Host "      ⏭️  SKIPPED (YAML pipeline — use gh ado2gh rewire-pipeline instead)" -ForegroundColor Yellow
-            $SkippedDetails.Add("$AdoProject/$PipelineLabel : YAML pipeline")
-            $Results.Add("⏭️  SKIPPED (YAML) | $AdoProject/$PipelineLabel")
-        } else {
-            $SuccessCount++
-            Write-Host "      ✅ SUCCESS" -ForegroundColor Green
-            $Results.Add("✅ SUCCESS | $AdoProject/$PipelineLabel → $GitHubOrg/$GitHubRepo")
-        }
+        $SuccessCount++
+        Write-Host "      ✅ SUCCESS" -ForegroundColor Green
+        $Results.Add("✅ SUCCESS | $AdoProject/$PipelineLabel → $GitHubOrg/$GitHubRepo")
     } catch {
         $FailureCount++
         $err = $_.Exception.Message
