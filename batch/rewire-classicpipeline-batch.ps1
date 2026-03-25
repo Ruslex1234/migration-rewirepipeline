@@ -261,7 +261,9 @@ foreach ($row in $rows) {
     $DefaultBranch = if ($CsvHeaders -contains "default_branch" -and $row.default_branch.Trim()) {
                          $row.default_branch.Trim() } else { "main" }
 
-    $PipelineLabel = if ($PipelineIdCsv) { "'$PipelineName' (ID: $PipelineIdCsv)" } else { "'$PipelineName'" }
+    $PipelineLabel = if ($PipelineIdCsv -and -not $PipelineName) { "(ID: $PipelineIdCsv)" }
+                    elseif ($PipelineIdCsv) { "'$PipelineName' (ID: $PipelineIdCsv)" }
+                    else { "'$PipelineName'" }
 
     Write-Host "`n   🔍 Checking: $PipelineLabel — repo: '$AdoRepo'" -ForegroundColor Gray
 

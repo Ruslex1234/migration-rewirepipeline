@@ -130,6 +130,112 @@ $env:ADO_PAT = "your-ado-pat"
 
 ---
 
+## Manually Creating CSV Files
+
+If `ado2gh generate-script --generate-archive-data` is unavailable or did not complete successfully, you can create the required CSV files by hand. This section covers how to fill in both files and how to locate each value in Azure DevOps.
+
+---
+
+### Manually creating `pipelines.csv` (split utility input)
+
+The split utility (`split/split-pipelines.sh` or `split/split-pipelines.ps1`) reads `pipelines.csv` and routes each row to either `classic_pipeline.csv` (Classic) or a new `pipelines.csv` (YAML) based on the pipeline type detected via the API.
+
+**Column layout:**
+
+| Column | Required | How to find it |
+|---|---|---|
+| `org` | Yes | Your Azure DevOps organization name — the part after `dev.azure.com/` in any ADO URL |
+| `teamproject` | Yes | The ADO project name — visible in the URL and the ADO project selector |
+| `repo` | Yes | The ADO Git repository name the pipeline is currently attached to |
+| `pipeline` | Yes* | The pipeline name as shown in ADO Pipelines. Required unless `url` contains a `definitionId` |
+| `url` | Recommended | Pipeline URL from ADO. Must contain `?definitionId=NNN` — the split script extracts the ID from this field and skips the name lookup API call. Find it by opening the pipeline in ADO and copying the browser URL |
+
+> **\* Name vs URL:** If the `url` column contains a valid `definitionId` query parameter (e.g., `https://dev.azure.com/myorg/MyProject/_build?definitionId=101`), the split script uses the ID directly and the `pipeline` name value is only used for informational labelling — it does not need to be exact. If `url` is empty or does not contain `definitionId`, the `pipeline` name must match exactly.
+
+**Minimum example (name-only, no URL):**
+
+```csv
+org,teamproject,repo,pipeline
+myorg,Platform,api-service,api-service-build
+myorg,Platform,web-frontend,web-frontend-ci
+```
+
+**Recommended example (with URL for direct ID lookup):**
+
+```csv
+org,teamproject,repo,pipeline,url
+myorg,Platform,api-service,api-service-build,https://dev.azure.com/myorg/Platform/_build?definitionId=101
+myorg,Platform,web-frontend,web-frontend-ci,https://dev.azure.com/myorg/Platform/_build?definitionId=202
+```
+
+> **Tip — finding pipeline URLs in ADO:** In Azure DevOps, go to **Pipelines** → click a pipeline → copy the URL from the browser address bar. It will look like `https://dev.azure.com/myorg/MyProject/_build?definitionId=NNN`.
+
+---
+
+### Manually creating `classic_pipeline.csv` (batch rewire input)
+
+The batch scripts (`batch/rewire-classicpipeline-batch.sh` and `.ps1`) read `classic_pipeline.csv` to rewire each classic pipeline to GitHub.
+
+**Column layout:**
+
+| Column | Required | How to find it |
+|---|---|---|
+| `org` | Yes | Your Azure DevOps organization name |
+| `teamproject` | Yes | The ADO project name |
+| `repo` | Yes | The ADO repository name the pipeline belongs to (used for `repos_with_status.csv` cross-reference) |
+| `pipeline` | Yes* | The exact pipeline name. Can be left blank if `pipeline_id` is provided |
+| `pipeline_id` | No* | The numeric pipeline definition ID. When provided, the name-to-ID lookup API call is skipped. Required if `pipeline` is left blank |
+| `url` | No | Informational only. Ignored by the rewire scripts |
+| `serviceConnection` | Yes | GUID of the GitHub service connection in Azure DevOps (see below) |
+| `github_org` | Yes | The GitHub organization that owns the target repository |
+| `github_repo` | Yes | The GitHub repository name to rewire the pipeline to |
+| `default_branch` | No | Branch to set as default (defaults to `main` if omitted) |
+
+> **\* pipeline vs pipeline_id:** You must provide at least one of these. You can provide both. Providing `pipeline_id` skips the name lookup — useful when pipeline names contain special characters or when two pipelines share the same name. If you provide only `pipeline_id`, leave the `pipeline` column present in the header but leave its value empty for those rows.
+
+#### How to find the pipeline name and ID
+
+1. In Azure DevOps, go to **Pipelines** (left sidebar)
+2. The pipeline name is shown in the list — this is the exact value for the `pipeline` column
+3. Click the pipeline — the URL contains `?definitionId=NNN` — that number is the `pipeline_id`
+
+#### How to find the service connection GUID
+
+1. In Azure DevOps, go to **Project Settings** (bottom-left) → **Service connections**
+2. Click the GitHub service connection you want to use
+3. The GUID is the last segment of the URL: `.../_settings/adminservices?resourceId=<GUID>`
+4. Alternatively, open the service connection and copy the **Resource ID** shown on the page
+
+> **Note:** The service connection must be of type **GitHub** and must already be authorized. The GUID placeholder `00000000-0000-0000-0000-000000000000` is rejected by the script.
+
+**Example — by pipeline name only:**
+
+```csv
+org,teamproject,repo,pipeline,pipeline_id,url,serviceConnection,github_org,github_repo,default_branch
+myorg,Platform,api-service,api-service-build,,https://dev.azure.com/myorg/Platform/_build?definitionId=101,3dfa8dac-601c-4b68-a4eb-29737c5ebf04,mycompany-gh,api-service,main
+myorg,Platform,web-frontend,web-frontend-ci,,https://dev.azure.com/myorg/Platform/_build?definitionId=202,3dfa8dac-601c-4b68-a4eb-29737c5ebf04,mycompany-gh,web-frontend,main
+```
+
+**Example — by pipeline ID only (no name required):**
+
+```csv
+org,teamproject,repo,pipeline,pipeline_id,url,serviceConnection,github_org,github_repo,default_branch
+myorg,Platform,api-service,,101,,3dfa8dac-601c-4b68-a4eb-29737c5ebf04,mycompany-gh,api-service,main
+myorg,Platform,web-frontend,,202,,3dfa8dac-601c-4b68-a4eb-29737c5ebf04,mycompany-gh,web-frontend,main
+```
+
+**Example — mixed (name where known, ID where ambiguous):**
+
+```csv
+org,teamproject,repo,pipeline,pipeline_id,url,serviceConnection,github_org,github_repo,default_branch
+myorg,Platform,api-service,api-service-build,,https://dev.azure.com/myorg/Platform/_build?definitionId=101,3dfa8dac-601c-4b68-a4eb-29737c5ebf04,mycompany-gh,api-service,main
+myorg,Platform,web-frontend,build,202,https://dev.azure.com/myorg/Platform/_build?definitionId=202,3dfa8dac-601c-4b68-a4eb-29737c5ebf04,mycompany-gh,web-frontend,main
+```
+
+> **Tip:** When `pipeline_id` is provided, the script uses it directly and skips the name lookup — no API call is needed to resolve the ID. This is faster and avoids failures when two pipelines share the same name.
+
+---
+
 ## Batch / CSV Mode
 
 Use the scripts in the `batch/` folder to rewire many classic pipelines at once from a CSV file. This is the recommended approach for large migrations and integrates with the `repos_with_status.csv` artifact produced by the migration pipeline.
@@ -145,8 +251,8 @@ The column layout mirrors the `pipelines.csv` format generated by `gh ado2gh gen
 | `org` | Yes | Azure DevOps organization name |
 | `teamproject` | Yes | Azure DevOps project name |
 | `repo` | Yes | Azure DevOps repository name — cross-referenced with `repos_with_status.csv` |
-| `pipeline` | Yes | Pipeline name (exact match). The script resolves this to an internal ID automatically |
-| `pipeline_id` | No | Numeric pipeline ID. When provided, skips the name-to-ID lookup API call. Useful when multiple pipelines share the same name |
+| `pipeline` | Yes* | Pipeline name (exact match). Can be left blank when `pipeline_id` is provided |
+| `pipeline_id` | No* | Numeric pipeline definition ID. When set, skips the name-to-ID lookup. Required if `pipeline` is blank. Useful when names are ambiguous or contain special characters |
 | `url` | No | Pipeline URL — informational only, populated automatically by `ado2gh generate-script` |
 | `serviceConnection` | Yes | GUID of the GitHub service connection in Azure DevOps |
 | `github_org` | Yes | Target GitHub organization |
