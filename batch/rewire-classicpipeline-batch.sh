@@ -294,7 +294,9 @@ while IFS= read -r line; do
         [[ -n "$val" ]] && DEFAULT_BRANCH="$val"
     fi
 
-    if [[ -n "$PIPELINE_ID_CSV" ]]; then
+    if [[ -n "$PIPELINE_ID_CSV" && -z "$PIPELINE_NAME" ]]; then
+        PIPELINE_LABEL="(ID: ${PIPELINE_ID_CSV})"
+    elif [[ -n "$PIPELINE_ID_CSV" ]]; then
         PIPELINE_LABEL="'${PIPELINE_NAME}' (ID: ${PIPELINE_ID_CSV})"
     else
         PIPELINE_LABEL="'${PIPELINE_NAME}'"
