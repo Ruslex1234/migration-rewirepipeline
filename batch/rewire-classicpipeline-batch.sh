@@ -49,7 +49,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CSV_FILE="${SCRIPT_DIR}/classic_pipeline.csv"
 REPOS_STATUS_FILE=""
-REQUIRED_COLUMNS=("org" "teamproject" "repo" "pipeline" "serviceConnection" "github_org" "github_repo")
+REQUIRED_COLUMNS=("org" "teamproject" "repo" "serviceConnection" "github_org" "github_repo")
 PLACEHOLDER_VALUES=("your-service-connection-id" "placeholder" "TODO" "TBD" "xxx" "00000000-0000-0000-0000-000000000000")
 
 # ── Colors ─────────────────────────────────────────────────────────────────────
@@ -228,6 +228,19 @@ if [[ ${#MISSING_COLUMNS[@]} -gt 0 ]]; then
     echo -e "${GRAY}   Found    : ${CSV_COLUMNS[*]}${NC}"
     exit 1
 fi
+
+# At least one pipeline identifier column must be present
+HAS_PIPELINE_NAME=false
+HAS_PIPELINE_ID=false
+for csv_col in "${CSV_COLUMNS[@]}"; do
+    [[ "$csv_col" == "pipeline"    ]] && HAS_PIPELINE_NAME=true
+    [[ "$csv_col" == "pipeline_id" ]] && HAS_PIPELINE_ID=true
+done
+if [[ "$HAS_PIPELINE_NAME" == false && "$HAS_PIPELINE_ID" == false ]]; then
+    echo -e "${RED}❌ ERROR: CSV must have at least one pipeline identifier column: 'pipeline' (name) or 'pipeline_id'${NC}"
+    echo -e "${GRAY}   Found : ${CSV_COLUMNS[*]}${NC}"
+    exit 1
+fi
 echo -e "${GREEN}✅ All required columns present${NC}"
 
 declare -A COL_INDEX
@@ -245,7 +258,12 @@ while IFS= read -r line; do
         fields[$i]=$(echo "${fields[$i]}" | sed 's/^"//;s/"$//')
     done
     SVC="${fields[${COL_INDEX["serviceConnection"]}]:-}"
-    PL="${fields[${COL_INDEX["pipeline"]}]:-}"
+    PL=""
+    if [[ -n "${COL_INDEX["pipeline"]+x}" ]]; then
+        PL="${fields[${COL_INDEX["pipeline"]}]:-}"
+    elif [[ -n "${COL_INDEX["pipeline_id"]+x}" ]]; then
+        PL="ID:${fields[${COL_INDEX["pipeline_id"]}]:-}"
+    fi
     if [[ -z "$SVC" ]]; then
         INVALID_ROWS+=("Row $ROW_NUM: '${PL}' — empty serviceConnection")
     else
@@ -278,7 +296,10 @@ while IFS= read -r line; do
     ADO_ORG="${fields[${COL_INDEX["org"]}]:-}"
     ADO_PROJECT="${fields[${COL_INDEX["teamproject"]}]:-}"
     ADO_REPO="${fields[${COL_INDEX["repo"]}]:-}"
-    PIPELINE_NAME="${fields[${COL_INDEX["pipeline"]}]:-}"
+    PIPELINE_NAME=""
+    if [[ -n "${COL_INDEX["pipeline"]+x}" ]]; then
+        PIPELINE_NAME="${fields[${COL_INDEX["pipeline"]}]:-}"
+    fi
     GITHUB_ORG="${fields[${COL_INDEX["github_org"]}]:-}"
     GITHUB_REPO="${fields[${COL_INDEX["github_repo"]}]:-}"
     SERVICE_CONN_ID="${fields[${COL_INDEX["serviceConnection"]}]:-}"
@@ -300,6 +321,16 @@ while IFS= read -r line; do
         PIPELINE_LABEL="'${PIPELINE_NAME}' (ID: ${PIPELINE_ID_CSV})"
     else
         PIPELINE_LABEL="'${PIPELINE_NAME}'"
+    fi
+
+    # Per-row: must have at least one of name or ID
+    if [[ -z "$PIPELINE_NAME" && -z "$PIPELINE_ID_CSV" ]]; then
+        FAILURE_COUNT=$((FAILURE_COUNT + 1))
+        ERR="Row has no pipeline name or pipeline_id — skipping"
+        echo -e "\n${RED}   ❌ FAILED (row $((SUCCESS_COUNT + FAILURE_COUNT + SKIPPED_COUNT + 1))): $ERR${NC}"
+        RESULTS+=("❌ FAILED | $ADO_PROJECT/[unknown pipeline]")
+        FAILED_DETAILS+=("$ADO_PROJECT/[unknown pipeline]: $ERR")
+        continue
     fi
 
     echo -e "\n${GRAY}   🔍 Checking: ${PIPELINE_LABEL} — repo: '${ADO_REPO}'${NC}"
