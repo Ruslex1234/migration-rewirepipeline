@@ -2,6 +2,36 @@
 
 Scripts that rewire a **classic** Azure DevOps pipeline to point to a GitHub repository. They update only the repository section of the pipeline definition, avoiding the `settingsSourceType=2` issue caused by `gh ado2gh rewire-pipeline` on classic pipelines.
 
+---
+
+## Table of Contents
+
+- [Overview](#rewire-classic-azure-devops-pipeline)
+- [Prerequisites](#prerequisites)
+- [Setup](#setup)
+- [Usage — Single Pipeline](#usage)
+  - [Shell script flags](#shell-script-flags)
+  - [PowerShell parameters](#powershell-parameters)
+- [Notes](#notes)
+- [Manually Creating CSV Files](#manually-creating-csv-files)
+  - [Manually creating pipelines.csv](#manually-creating-pipelinescsv-split-utility-input)
+  - [Manually creating classic\_pipeline.csv](#manually-creating-classic_pipelinecsv-batch-rewire-input)
+    - [How to find the pipeline name and ID](#how-to-find-the-pipeline-name-and-id)
+    - [How to find the service connection GUID](#how-to-find-the-service-connection-guid)
+- [Batch / CSV Mode](#batch--csv-mode)
+  - [CSV file: classic\_pipeline.csv](#csv-file-classic_pipelinecsv)
+  - [Using the batch scripts](#using-the-batch-scripts)
+  - [Integration with repos\_with\_status.csv](#integration-with-the-migration-pipeline-repos_with_statuscsv)
+  - [What the batch scripts do for each row](#what-the-batch-scripts-do-for-each-row)
+- [Split Utility: Classify pipelines.csv by Type](#split-utility-classify-pipelinescsv-by-type)
+  - [How it works](#how-it-works)
+  - [Usage](#usage-1)
+  - [Output files](#output-files)
+  - [Recommended workflow](#recommended-workflow)
+  - [After splitting: augment classic\_pipeline.csv](#after-splitting-augment-classic_pipelinecsv)
+
+---
+
 Two modes are available:
 
 | Mode | Use when |
