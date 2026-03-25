@@ -206,7 +206,7 @@ Write-Host "✅ File loaded: $PipelineCount pipeline(s) found" -ForegroundColor 
 # ── Step 3: Validate columns and service connection IDs ───────────────────────
 Write-Host "`n[Step 3/4] Validating CSV columns and data..." -ForegroundColor Yellow
 
-$RequiredCols = @("org","teamproject","repo","pipeline","serviceConnection","github_org","github_repo")
+$RequiredCols = @("org","teamproject","repo","serviceConnection","github_org","github_repo")
 $CsvHeaders   = ($rows[0].PSObject.Properties.Name)
 $MissingCols  = $RequiredCols | Where-Object { $_ -notin $CsvHeaders }
 
@@ -214,6 +214,13 @@ if ($MissingCols.Count -gt 0) {
     Write-Host "❌ ERROR: CSV missing required columns: $($MissingCols -join ', ')" -ForegroundColor Red
     Write-Host "   Required : $($RequiredCols -join ', ')" -ForegroundColor Yellow
     Write-Host "   Found    : $($CsvHeaders -join ', ')" -ForegroundColor Gray
+    exit 1
+}
+
+# At least one pipeline identifier column must be present
+if (("pipeline" -notin $CsvHeaders) -and ("pipeline_id" -notin $CsvHeaders)) {
+    Write-Host "❌ ERROR: CSV must have at least one pipeline identifier column: 'pipeline' (name) or 'pipeline_id'" -ForegroundColor Red
+    Write-Host "   Found : $($CsvHeaders -join ', ')" -ForegroundColor Gray
     exit 1
 }
 Write-Host "✅ All required columns present" -ForegroundColor Green
@@ -224,7 +231,9 @@ $rowNum = 1
 foreach ($row in $rows) {
     $rowNum++
     $svc = $row.serviceConnection.Trim()
-    $pl  = $row.pipeline.Trim()
+    $pl  = if ("pipeline" -in $CsvHeaders) { $row.pipeline.Trim() }
+           elseif ("pipeline_id" -in $CsvHeaders) { "ID:$($row.pipeline_id.Trim())" }
+           else { "" }
     if (-not $svc) {
         $InvalidRows.Add("Row ${rowNum}: '${pl}' — empty serviceConnection")
     } elseif ($svc -in $PlaceholderValues) {
@@ -253,7 +262,7 @@ foreach ($row in $rows) {
     $AdoOrg        = $row.org.Trim()
     $AdoProject    = $row.teamproject.Trim()
     $AdoRepo       = $row.repo.Trim()
-    $PipelineName  = $row.pipeline.Trim()
+    $PipelineName  = if ($CsvHeaders -contains "pipeline") { $row.pipeline.Trim() } else { "" }
     $GitHubOrg     = $row.github_org.Trim()
     $GitHubRepo    = $row.github_repo.Trim()
     $SvcConnId     = $row.serviceConnection.Trim()
@@ -264,6 +273,16 @@ foreach ($row in $rows) {
     $PipelineLabel = if ($PipelineIdCsv -and -not $PipelineName) { "(ID: $PipelineIdCsv)" }
                     elseif ($PipelineIdCsv) { "'$PipelineName' (ID: $PipelineIdCsv)" }
                     else { "'$PipelineName'" }
+
+    # Per-row: must have at least one of name or ID
+    if (-not $PipelineName -and -not $PipelineIdCsv) {
+        $FailureCount++
+        $err = "Row has no pipeline name or pipeline_id — skipping"
+        Write-Host "`n   ❌ FAILED [$AdoProject/unknown pipeline]: $err" -ForegroundColor Red
+        $Results.Add("❌ FAILED | $AdoProject/[unknown pipeline]")
+        $FailedDetails.Add("$AdoProject/[unknown pipeline] : $err")
+        continue
+    }
 
     Write-Host "`n   🔍 Checking: $PipelineLabel — repo: '$AdoRepo'" -ForegroundColor Gray
 
