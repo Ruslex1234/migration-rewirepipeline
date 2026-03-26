@@ -29,6 +29,8 @@ Scripts that rewire a **classic** Azure DevOps pipeline to point to a GitHub rep
   - [Output files](#output-files)
   - [Recommended workflow](#recommended-workflow)
   - [After splitting: augment classic\_pipeline.csv](#after-splitting-augment-classic_pipelinecsv)
+- [Utility Scripts](#utility-scripts)
+  - [Augment repos.csv](#augment-reposacsv)
 
 ---
 
@@ -52,6 +54,13 @@ Two modes are available:
 |---|---|
 | `batch/rewire-classicpipeline-batch.ps1` | Windows / macOS / Linux (PowerShell) |
 | `batch/rewire-classicpipeline-batch.sh` | Linux / macOS (Bash) |
+
+### Utility scripts
+
+| Script | Platform | Purpose |
+|---|---|---|
+| `scripts/augment-repos-csv.ps1` | Windows / macOS / Linux (PowerShell) | Add `github_org`, `github_repo`, `gh_repo_visibility` columns to `repos.csv` |
+| `scripts/augment-repos-csv.sh` | Linux / macOS (Bash) | Add `github_org`, `github_repo`, `gh_repo_visibility` columns to `repos.csv` |
 
 ---
 
@@ -462,3 +471,47 @@ The `classic_pipeline.csv` produced by the split utility contains the same colum
 | `github_repo` | Yes | Target GitHub repository name |
 | `pipeline_id` | No | Numeric pipeline ID — skips the name-to-ID lookup; useful when names are ambiguous |
 | `default_branch` | No | Default branch (defaults to `main` if omitted) |
+
+---
+
+## Utility Scripts
+
+### Augment repos.csv
+
+**Scripts:** `scripts/augment-repos-csv.sh` (Bash) and `scripts/augment-repos-csv.ps1` (PowerShell)
+
+When `ado2gh generate-script --generate-archive-data` produces a `repos.csv`, it does not include the GitHub destination columns needed for migration. These scripts augment the file in place by appending three columns to every data row:
+
+| Column added | Default value | Notes |
+|---|---|---|
+| `github_org` | *(blank)* | Fill in your GitHub organization name before running the migration |
+| `github_repo` | Copied from column C | The third column of the CSV is used as the GitHub repository name |
+| `gh_repo_visibility` | `private` | Set to `private` for all rows |
+
+The file is overwritten safely using a temp file. Running the script a second time on an already-augmented file is safe — it detects the columns are already present and exits without making changes.
+
+#### Linux / macOS — Bash
+
+```bash
+chmod +x scripts/augment-repos-csv.sh
+
+# Default: reads/writes repos.csv in the scripts/ folder
+./scripts/augment-repos-csv.sh
+
+# Custom file path
+./scripts/augment-repos-csv.sh --csv /path/to/repos.csv
+```
+
+#### Windows / macOS / Linux — PowerShell
+
+```powershell
+# Default: reads/writes repos.csv in the scripts/ folder
+.\scripts\augment-repos-csv.ps1
+
+# Custom file path
+.\scripts\augment-repos-csv.ps1 -CsvFile C:\migration\repos.csv
+```
+
+#### After running
+
+Open `repos.csv` and fill in the `github_org` column for each row. The `github_repo` and `gh_repo_visibility` columns are already populated and ready to use.
