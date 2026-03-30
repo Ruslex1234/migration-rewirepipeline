@@ -169,6 +169,7 @@ while IFS= read -r line; do
     }
 
     PROCESS_TYPE=$(echo "$DEF_JSON" | jq -r '.process.type')
+    echo -e "${GRAY}  API response: process.type = ${PROCESS_TYPE} (ID: ${DEF_ID})${NC}"
 
     case "$PROCESS_TYPE" in
         2)

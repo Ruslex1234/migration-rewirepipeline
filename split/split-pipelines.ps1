@@ -159,6 +159,7 @@ foreach ($row in $rows) {
     # as [Int64] in PS 5.1, which does not reliably match [Int32] literals
     # inside a switch statement. if/elseif with -eq avoids the type mismatch.
     $processType = [int]($definition.process.type)
+    Write-Host "  API response  : process.type = $processType (ID: $defId)" -ForegroundColor Gray
 
     if ($processType -eq 2) {
         Write-Host "  YAML              : $pipelineName" -ForegroundColor Green
