@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Batch-rewires classic Azure DevOps pipelines to GitHub using classic_pipeline.csv.
+    Batch-rewires classic Azure DevOps pipelines to GitHub using classic_pipelines.csv.
 
 .DESCRIPTION
-    Reads pipeline rows from classic_pipeline.csv and rewires each classic
+    Reads pipeline rows from classic_pipelines.csv and rewires each classic
     (process type 1) pipeline to its corresponding GitHub repository via the
     Azure DevOps REST API.
 
@@ -22,7 +22,7 @@
     - ADO_PAT environment variable (Build: Read & Execute)
 
 .PARAMETER CsvFile
-    Path to classic_pipeline.csv. Defaults to classic_pipeline.csv in the
+    Path to classic_pipelines.csv. Defaults to classic_pipelines.csv in the
     same directory as this script.
 
 .PARAMETER ReposStatusFile
@@ -36,15 +36,15 @@
 
 .EXAMPLE
     $env:ADO_PAT = "your-ado-pat"
-    .\rewire-classicpipeline-batch.ps1 -CsvFile C:\migration\classic_pipeline.csv
+    .\rewire-classicpipeline-batch.ps1 -CsvFile C:\migration\classic_pipelines.csv
 
 .EXAMPLE
     $env:ADO_PAT = "your-ado-pat"
     .\rewire-classicpipeline-batch.ps1 `
-        -CsvFile            C:\migration\classic_pipeline.csv `
+        -CsvFile            C:\migration\classic_pipelines.csv `
         -ReposStatusFile    C:\migration\repos_with_status.csv
 
-.CSV FORMAT (classic_pipeline.csv)
+.CSV FORMAT (classic_pipelines.csv)
     Required columns : org, teamproject, repo, pipeline, serviceConnection,
                        github_org, github_repo
     Optional columns : pipeline_id    (numeric ID; when provided, skips name lookup)
@@ -61,7 +61,7 @@ param (
 # ── Resolve default CSV path ──────────────────────────────────────────────────
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 if (-not $CsvFile) {
-    $CsvFile = Join-Path $ScriptDir "classic_pipeline.csv"
+    $CsvFile = Join-Path $ScriptDir "classic_pipelines.csv"
 }
 
 # ── Placeholder values that should be rejected ───────────────────────────────
@@ -187,10 +187,10 @@ if (-not $env:ADO_PAT) {
 Write-Host "ADO_PAT validated" -ForegroundColor Green
 
 # ── Step 2: Validate CSV file ─────────────────────────────────────────────────
-Write-Host "`n[Step 2/4] Validating classic_pipeline.csv..." -ForegroundColor Yellow
+Write-Host "`n[Step 2/4] Validating classic_pipelines.csv..." -ForegroundColor Yellow
 if (-not (Test-Path $CsvFile)) {
     Write-Host "ERROR: CSV file not found: $CsvFile" -ForegroundColor Red
-    Write-Host "   Use -CsvFile <path> or place classic_pipeline.csv in the batch/ folder" -ForegroundColor Yellow
+    Write-Host "   Use -CsvFile <path> or place classic_pipelines.csv in the batch/ folder" -ForegroundColor Yellow
     exit 1
 }
 
@@ -198,7 +198,7 @@ $rows = Import-Csv $CsvFile
 $PipelineCount = $rows.Count
 if ($PipelineCount -eq 0) {
     Write-Host "WARNING: No pipelines found in CSV (only header or empty file)" -ForegroundColor Yellow
-    Write-Host "   Add pipeline rows to classic_pipeline.csv and re-run" -ForegroundColor Gray
+    Write-Host "   Add pipeline rows to classic_pipelines.csv and re-run" -ForegroundColor Gray
     exit 0
 }
 Write-Host "File loaded: $PipelineCount pipeline(s) found" -ForegroundColor Green
