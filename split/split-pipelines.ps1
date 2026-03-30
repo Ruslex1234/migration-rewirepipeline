@@ -44,6 +44,9 @@ param (
     [string]$CsvFile = ""
 )
 
+# Fix emoji/UTF-8 display in Windows PowerShell 5.1
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 # ── Resolve default path ───────────────────────────────────────────────────────
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 if (-not $CsvFile) {
@@ -99,10 +102,10 @@ foreach ($col in @("org", "teamproject", "pipeline")) {
 $hasUrlCol = "url" -in $csvHeaders
 
 # ── Process rows ───────────────────────────────────────────────────────────────
-$YamlRows    = [System.Collections.Generic.List[PSObject]]::new()
-$ClassicRows = [System.Collections.Generic.List[PSObject]]::new()
-$UnknownRows = [System.Collections.Generic.List[PSObject]]::new()
-$FailedRows  = [System.Collections.Generic.List[PSObject]]::new()
+$YamlRows    = @()
+$ClassicRows = @()
+$UnknownRows = @()
+$FailedRows  = @()
 $Total       = 0
 
 foreach ($row in $rows) {
@@ -126,17 +129,17 @@ foreach ($row in $rows) {
             $list = Invoke-RestMethod -Method GET -Uri $listUrl -Headers $headers
         } catch {
             Write-Host "  ❌ FAILED (API error)    : $pipelineName" -ForegroundColor Red
-            $FailedRows.Add($row)
+            $FailedRows += $row
             continue
         }
         if ($list.count -eq 0) {
             Write-Host "  ⚠️  NOT FOUND            : $pipelineName" -ForegroundColor Yellow
-            $UnknownRows.Add($row)
+            $UnknownRows += $row
             continue
         }
         if ($list.count -gt 1) {
             Write-Host "  ⚠️  AMBIGUOUS ($($list.count) matches): $pipelineName" -ForegroundColor Yellow
-            $UnknownRows.Add($row)
+            $UnknownRows += $row
             continue
         }
         $defId = $list.value[0].id
@@ -148,7 +151,7 @@ foreach ($row in $rows) {
         $definition = Invoke-RestMethod -Method GET -Uri $defUrl -Headers $headers
     } catch {
         Write-Host "  ❌ FAILED (definition fetch): $pipelineName" -ForegroundColor Red
-        $FailedRows.Add($row)
+        $FailedRows += $row
         continue
     }
 
@@ -157,15 +160,15 @@ foreach ($row in $rows) {
     switch ($processType) {
         2 {
             Write-Host "  ✅ YAML              : $pipelineName" -ForegroundColor Green
-            $YamlRows.Add($row)
+            $YamlRows += $row
         }
         1 {
             Write-Host "  🔧 CLASSIC           : $pipelineName" -ForegroundColor Cyan
-            $ClassicRows.Add($row)
+            $ClassicRows += $row
         }
         default {
             Write-Host "  ❓ UNKNOWN (type=$processType): $pipelineName" -ForegroundColor Yellow
-            $UnknownRows.Add($row)
+            $UnknownRows += $row
         }
     }
 
