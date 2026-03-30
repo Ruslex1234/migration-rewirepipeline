@@ -128,17 +128,17 @@ foreach ($row in $rows) {
         try {
             $list = Invoke-RestMethod -Method GET -Uri $listUrl -Headers $headers
         } catch {
-            Write-Host "  ❌ FAILED (API error)    : $pipelineName" -ForegroundColor Red
+            Write-Host "  FAILED (API error)    : $pipelineName" -ForegroundColor Red
             $FailedRows += $row
             continue
         }
         if ($list.count -eq 0) {
-            Write-Host "  ⚠️  NOT FOUND            : $pipelineName" -ForegroundColor Yellow
+            Write-Host "  NOT FOUND             : $pipelineName" -ForegroundColor Yellow
             $UnknownRows += $row
             continue
         }
         if ($list.count -gt 1) {
-            Write-Host "  ⚠️  AMBIGUOUS ($($list.count) matches): $pipelineName" -ForegroundColor Yellow
+            Write-Host "  AMBIGUOUS ($($list.count) matches): $pipelineName" -ForegroundColor Yellow
             $UnknownRows += $row
             continue
         }
@@ -150,26 +150,25 @@ foreach ($row in $rows) {
     try {
         $definition = Invoke-RestMethod -Method GET -Uri $defUrl -Headers $headers
     } catch {
-        Write-Host "  ❌ FAILED (definition fetch): $pipelineName" -ForegroundColor Red
+        Write-Host "  FAILED (definition fetch): $pipelineName" -ForegroundColor Red
         $FailedRows += $row
         continue
     }
 
-    $processType = $definition.process.type
+    # Cast explicitly to [int] — Invoke-RestMethod deserializes JSON numbers
+    # as [Int64] in PS 5.1, which does not reliably match [Int32] literals
+    # inside a switch statement. if/elseif with -eq avoids the type mismatch.
+    $processType = [int]($definition.process.type)
 
-    switch ($processType) {
-        2 {
-            Write-Host "  ✅ YAML              : $pipelineName" -ForegroundColor Green
-            $YamlRows += $row
-        }
-        1 {
-            Write-Host "  🔧 CLASSIC           : $pipelineName" -ForegroundColor Cyan
-            $ClassicRows += $row
-        }
-        default {
-            Write-Host "  ❓ UNKNOWN (type=$processType): $pipelineName" -ForegroundColor Yellow
-            $UnknownRows += $row
-        }
+    if ($processType -eq 2) {
+        Write-Host "  YAML              : $pipelineName" -ForegroundColor Green
+        $YamlRows += $row
+    } elseif ($processType -eq 1) {
+        Write-Host "  CLASSIC           : $pipelineName" -ForegroundColor Cyan
+        $ClassicRows += $row
+    } else {
+        Write-Host "  UNKNOWN (type=$processType): $pipelineName" -ForegroundColor Yellow
+        $UnknownRows += $row
     }
 
     Start-Sleep -Milliseconds 300
