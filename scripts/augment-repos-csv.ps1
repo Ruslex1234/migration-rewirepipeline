@@ -6,9 +6,9 @@
 .DESCRIPTION
     Reads an existing repos.csv file and appends three columns to every
     data row:
-      github_org          — left blank for the user to fill in
-      github_repo         — copied from column C (the third column)
-      gh_repo_visibility  — set to "private" for all rows
+      github_org          - left blank for the user to fill in
+      github_repo         - copied from column C (the third column)
+      gh_repo_visibility  - set to "private" for all rows
 
     The original file is overwritten with the augmented version.
     If the three columns already exist in the header they are not added
@@ -40,7 +40,7 @@ if (-not $CsvFile) {
 
 # ── Validate input file ────────────────────────────────────────────────────────
 if (-not (Test-Path $CsvFile)) {
-    Write-Host "❌ ERROR: CSV file not found: $CsvFile" -ForegroundColor Red
+    Write-Host "ERROR: CSV file not found: $CsvFile" -ForegroundColor Red
     Write-Host "   Place repos.csv in the scripts/ folder or use -CsvFile <path>" -ForegroundColor Yellow
     exit 1
 }
@@ -49,12 +49,12 @@ if (-not (Test-Path $CsvFile)) {
 $lines = [System.IO.File]::ReadAllLines($CsvFile, [System.Text.Encoding]::UTF8)
 
 if ($lines.Count -le 1) {
-    Write-Host "⚠️  No data rows found in: $CsvFile (file is empty or header-only)" -ForegroundColor Yellow
+    Write-Host "WARNING: No data rows found in: $CsvFile (file is empty or header-only)" -ForegroundColor Yellow
     exit 0
 }
 
 $rowCount = $lines.Count - 1
-Write-Host "📂 Input : $CsvFile ($rowCount data row(s))"
+Write-Host "Input : $CsvFile ($rowCount data row(s))"
 
 # ── Parse header ───────────────────────────────────────────────────────────────
 # Simple CSV header split (headers are not expected to contain commas)
@@ -64,7 +64,7 @@ $newCols   = @("github_org", "github_repo", "gh_repo_visibility")
 $colsToAdd = $newCols | Where-Object { $_ -notin $header }
 
 if ($colsToAdd.Count -eq 0) {
-    Write-Host "ℹ️  All three columns already present — no changes made." -ForegroundColor Cyan
+    Write-Host "INFO: All three columns already present -- no changes made." -ForegroundColor Cyan
     exit 0
 }
 
@@ -86,7 +86,7 @@ try {
             continue
         }
 
-        # Split on commas — simple split (values are not expected to contain commas)
+        # Split on commas -- simple split (values are not expected to contain commas)
         $fields = $line -split ','
 
         # Column C = index 2
@@ -94,7 +94,7 @@ try {
 
         $extra = foreach ($col in $colsToAdd) {
             switch ($col) {
-                "github_org"           { "" }           # blank — user fills in later
+                "github_org"           { "" }           # blank -- user fills in later
                 "github_repo"          { $colCValue }   # copy from column C
                 "gh_repo_visibility"   { "private" }
             }
@@ -107,10 +107,10 @@ try {
     [System.IO.File]::WriteAllLines($tmpFile, $output, [System.Text.Encoding]::UTF8)
     Move-Item -Path $tmpFile -Destination $CsvFile -Force
 
-    Write-Host "✅ Done — columns added: $($colsToAdd -join ', ')" -ForegroundColor Green
+    Write-Host "Done -- columns added: $($colsToAdd -join ', ')" -ForegroundColor Green
 
 } catch {
     if (Test-Path $tmpFile) { Remove-Item $tmpFile -Force }
-    Write-Host "❌ ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }

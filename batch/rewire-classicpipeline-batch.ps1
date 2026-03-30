@@ -92,10 +92,10 @@ function Load-MigratedRepos {
         if ($status -eq "Success") { $script:MigratedRepos[$repo] = $true }
     }
 
-    Write-Host "✅ Loaded $($script:MigratedRepos.Count) successfully migrated repositories" -ForegroundColor Green
+    Write-Host "Loaded $($script:MigratedRepos.Count) successfully migrated repositories" -ForegroundColor Green
 
     if ($script:MigratedRepos.Count -eq 0) {
-        Write-Host "⚠️  No successful migrations found — all pipelines will be skipped" -ForegroundColor Yellow
+        Write-Host "WARNING: No successful migrations found — all pipelines will be skipped" -ForegroundColor Yellow
     }
 }
 
@@ -172,24 +172,24 @@ if ($ReposStatusFile) {
     if (Test-Path $ReposStatusFile) {
         Load-MigratedRepos -StatusFile $ReposStatusFile
     } else {
-        Write-Host "⚠️  repos_with_status.csv not found at: $ReposStatusFile — processing all rows" -ForegroundColor Yellow
+        Write-Host "WARNING: repos_with_status.csv not found at: $ReposStatusFile — processing all rows" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "ℹ️  No repos_with_status.csv detected — processing all rows in CSV" -ForegroundColor Gray
+    Write-Host "No repos_with_status.csv detected — processing all rows in CSV" -ForegroundColor Gray
 }
 
 # ── Step 1: Validate ADO_PAT ──────────────────────────────────────────────────
 Write-Host "[Step 1/4] Validating ADO_PAT..." -ForegroundColor Yellow
 if (-not $env:ADO_PAT) {
-    Write-Host "❌ ERROR: ADO_PAT environment variable is not set" -ForegroundColor Red
+    Write-Host "ERROR: ADO_PAT environment variable is not set" -ForegroundColor Red
     exit 1
 }
-Write-Host "✅ ADO_PAT validated" -ForegroundColor Green
+Write-Host "ADO_PAT validated" -ForegroundColor Green
 
 # ── Step 2: Validate CSV file ─────────────────────────────────────────────────
 Write-Host "`n[Step 2/4] Validating classic_pipeline.csv..." -ForegroundColor Yellow
 if (-not (Test-Path $CsvFile)) {
-    Write-Host "❌ ERROR: CSV file not found: $CsvFile" -ForegroundColor Red
+    Write-Host "ERROR: CSV file not found: $CsvFile" -ForegroundColor Red
     Write-Host "   Use -CsvFile <path> or place classic_pipeline.csv in the batch/ folder" -ForegroundColor Yellow
     exit 1
 }
@@ -197,11 +197,11 @@ if (-not (Test-Path $CsvFile)) {
 $rows = Import-Csv $CsvFile
 $PipelineCount = $rows.Count
 if ($PipelineCount -eq 0) {
-    Write-Host "⚠️  No pipelines found in CSV (only header or empty file)" -ForegroundColor Yellow
+    Write-Host "WARNING: No pipelines found in CSV (only header or empty file)" -ForegroundColor Yellow
     Write-Host "   Add pipeline rows to classic_pipeline.csv and re-run" -ForegroundColor Gray
     exit 0
 }
-Write-Host "✅ File loaded: $PipelineCount pipeline(s) found" -ForegroundColor Green
+Write-Host "File loaded: $PipelineCount pipeline(s) found" -ForegroundColor Green
 
 # ── Step 3: Validate columns and service connection IDs ───────────────────────
 Write-Host "`n[Step 3/4] Validating CSV columns and data..." -ForegroundColor Yellow
@@ -211,7 +211,7 @@ $CsvHeaders   = ($rows[0].PSObject.Properties.Name)
 $MissingCols  = $RequiredCols | Where-Object { $_ -notin $CsvHeaders }
 
 if ($MissingCols.Count -gt 0) {
-    Write-Host "❌ ERROR: CSV missing required columns: $($MissingCols -join ', ')" -ForegroundColor Red
+    Write-Host "ERROR: CSV missing required columns: $($MissingCols -join ', ')" -ForegroundColor Red
     Write-Host "   Required : $($RequiredCols -join ', ')" -ForegroundColor Yellow
     Write-Host "   Found    : $($CsvHeaders -join ', ')" -ForegroundColor Gray
     exit 1
@@ -219,11 +219,11 @@ if ($MissingCols.Count -gt 0) {
 
 # At least one pipeline identifier column must be present
 if (("pipeline" -notin $CsvHeaders) -and ("pipeline_id" -notin $CsvHeaders)) {
-    Write-Host "❌ ERROR: CSV must have at least one pipeline identifier column: 'pipeline' (name) or 'pipeline_id'" -ForegroundColor Red
+    Write-Host "ERROR: CSV must have at least one pipeline identifier column: 'pipeline' (name) or 'pipeline_id'" -ForegroundColor Red
     Write-Host "   Found : $($CsvHeaders -join ', ')" -ForegroundColor Gray
     exit 1
 }
-Write-Host "✅ All required columns present" -ForegroundColor Green
+Write-Host "All required columns present" -ForegroundColor Green
 
 Write-Host "   Validating service connection IDs..." -ForegroundColor Gray
 $InvalidRows = [System.Collections.Generic.List[string]]::new()
@@ -242,12 +242,12 @@ foreach ($row in $rows) {
 }
 
 if ($InvalidRows.Count -gt 0) {
-    Write-Host "`n❌ ERROR: Invalid service connection IDs found:" -ForegroundColor Red
+    Write-Host "`nERROR: Invalid service connection IDs found:" -ForegroundColor Red
     $InvalidRows | ForEach-Object { Write-Host "      $_" -ForegroundColor Yellow }
-    Write-Host "`n   💡 Fix: Azure DevOps → Project Settings → Service Connections → copy the GUID" -ForegroundColor Cyan
+    Write-Host "`n   (tip) Fix: Azure DevOps → Project Settings → Service Connections → copy the GUID" -ForegroundColor Cyan
     exit 1
 }
-Write-Host "✅ All service connection IDs validated" -ForegroundColor Green
+Write-Host "All service connection IDs validated" -ForegroundColor Green
 
 # ── Step 4: Process pipelines ──────────────────────────────────────────────────
 Write-Host "`n[Step 4/4] Processing classic pipelines..." -ForegroundColor Yellow
@@ -278,24 +278,24 @@ foreach ($row in $rows) {
     if (-not $PipelineName -and -not $PipelineIdCsv) {
         $FailureCount++
         $err = "Row has no pipeline name or pipeline_id — skipping"
-        Write-Host "`n   ❌ FAILED [$AdoProject/unknown pipeline]: $err" -ForegroundColor Red
-        $Results.Add("❌ FAILED | $AdoProject/[unknown pipeline]")
+        Write-Host "`n   FAILED [$AdoProject/unknown pipeline]: $err" -ForegroundColor Red
+        $Results.Add("FAILED | $AdoProject/[unknown pipeline]")
         $FailedDetails.Add("$AdoProject/[unknown pipeline] : $err")
         continue
     }
 
-    Write-Host "`n   🔍 Checking: $PipelineLabel — repo: '$AdoRepo'" -ForegroundColor Gray
+    Write-Host "`n   >> Checking: $PipelineLabel — repo: '$AdoRepo'" -ForegroundColor Gray
 
     # Optional status filter
     if ($FilterByStatus -and -not $MigratedRepos.ContainsKey($AdoRepo)) {
         $SkippedCount++
-        Write-Host "   ⏭️  Skipped: $PipelineLabel" -ForegroundColor Yellow
+        Write-Host "   Skipped: $PipelineLabel" -ForegroundColor Yellow
         Write-Host "      Reason: '$AdoRepo' not found in repos_with_status.csv as Success" -ForegroundColor Gray
         $SkippedDetails.Add("$AdoProject/$PipelineLabel : repo '$AdoRepo' not successfully migrated")
         continue
     }
 
-    Write-Host "   🔄 Processing: $PipelineLabel" -ForegroundColor Cyan
+    Write-Host "   >> Processing: $PipelineLabel" -ForegroundColor Cyan
     Write-Host "      ADO    : $AdoOrg/$AdoProject" -ForegroundColor Gray
     Write-Host "      GitHub : $GitHubOrg/$GitHubRepo (branch: $DefaultBranch)" -ForegroundColor Gray
     Write-Host "      Svc    : $SvcConnId" -ForegroundColor Gray
@@ -314,8 +314,8 @@ foreach ($row in $rows) {
         } catch {
             $FailureCount++
             $err = "Failed to query pipeline list for '$PipelineName': $_"
-            Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
-            $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
+            Write-Host "      FAILED: $err" -ForegroundColor Red
+            $Results.Add("FAILED | $AdoProject/$PipelineLabel")
             $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
             continue
         }
@@ -323,16 +323,16 @@ foreach ($row in $rows) {
         if ($list.count -eq 0) {
             $FailureCount++
             $err = "No pipeline found with name '$PipelineName'"
-            Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
-            $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
+            Write-Host "      FAILED: $err" -ForegroundColor Red
+            $Results.Add("FAILED | $AdoProject/$PipelineLabel")
             $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
             continue
         }
         if ($list.count -gt 1) {
             $FailureCount++
             $err = "Multiple pipelines matched '$PipelineName' — use a more specific name or add the pipeline_id column"
-            Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
-            $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
+            Write-Host "      FAILED: $err" -ForegroundColor Red
+            $Results.Add("FAILED | $AdoProject/$PipelineLabel")
             $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
             continue
         }
@@ -350,8 +350,8 @@ foreach ($row in $rows) {
     } catch {
         $FailureCount++
         $err = "Failed to fetch pipeline definition (ID: $ResolvedId): $_"
-        Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
-        $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel")
+        Write-Host "      FAILED: $err" -ForegroundColor Red
+        $Results.Add("FAILED | $AdoProject/$PipelineLabel")
         $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
         continue
     }
@@ -360,16 +360,16 @@ foreach ($row in $rows) {
 
     if ($processType -eq 2) {
         $SkippedCount++
-        Write-Host "      ⏭️  SKIPPED — '$PipelineName' is a YAML pipeline (process.type=2), not a classic pipeline" -ForegroundColor Yellow
+        Write-Host "      SKIPPED: SKIPPED — '$PipelineName' is a YAML pipeline (process.type=2), not a classic pipeline" -ForegroundColor Yellow
         Write-Host "         To rewire YAML pipelines use: gh ado2gh rewire-pipeline" -ForegroundColor Gray
         $SkippedDetails.Add("$AdoProject/$PipelineLabel : YAML pipeline (process.type=2) — use gh ado2gh rewire-pipeline")
-        $Results.Add("⏭️  SKIPPED (YAML, not classic) | $AdoProject/$PipelineLabel")
+        $Results.Add("SKIPPED: SKIPPED (YAML, not classic) | $AdoProject/$PipelineLabel")
         continue
     } elseif ($processType -ne 1) {
         $SkippedCount++
-        Write-Host "      ⏭️  SKIPPED — '$PipelineName' has unknown process type (process.type=$processType)" -ForegroundColor Yellow
+        Write-Host "      SKIPPED: SKIPPED — '$PipelineName' has unknown process type (process.type=$processType)" -ForegroundColor Yellow
         $SkippedDetails.Add("$AdoProject/$PipelineLabel : Unknown process type ($processType)")
-        $Results.Add("⏭️  SKIPPED (unknown type=$processType) | $AdoProject/$PipelineLabel")
+        $Results.Add("SKIPPED: SKIPPED (unknown type=$processType) | $AdoProject/$PipelineLabel")
         continue
     }
 
@@ -388,13 +388,13 @@ foreach ($row in $rows) {
             -Definition        $definition
 
         $SuccessCount++
-        Write-Host "      ✅ SUCCESS" -ForegroundColor Green
-        $Results.Add("✅ SUCCESS | $AdoProject/$PipelineLabel → $GitHubOrg/$GitHubRepo")
+        Write-Host "      SUCCESS" -ForegroundColor Green
+        $Results.Add("SUCCESS | $AdoProject/$PipelineLabel → $GitHubOrg/$GitHubRepo")
     } catch {
         $FailureCount++
         $err = $_.Exception.Message
-        Write-Host "      ❌ FAILED: $err" -ForegroundColor Red
-        $Results.Add("❌ FAILED | $AdoProject/$PipelineLabel → $GitHubOrg/$GitHubRepo")
+        Write-Host "      FAILED: $err" -ForegroundColor Red
+        $Results.Add("FAILED | $AdoProject/$PipelineLabel → $GitHubOrg/$GitHubRepo")
         $FailedDetails.Add("$AdoProject/$PipelineLabel : $err")
     }
 
@@ -411,16 +411,16 @@ Write-Host "Successful      : $SuccessCount"  -ForegroundColor Green
 Write-Host "Skipped         : $SkippedCount"  -ForegroundColor Yellow
 Write-Host "Failed          : $FailureCount"  -ForegroundColor Red
 
-Write-Host "`n📋 Detailed Results:" -ForegroundColor Cyan
+Write-Host "`n(results) Detailed Results:" -ForegroundColor Cyan
 $Results | ForEach-Object { Write-Host "   $_" -ForegroundColor Gray }
 
 if ($SkippedDetails.Count -gt 0) {
-    Write-Host "`n⏭️  Skipped:" -ForegroundColor Yellow
+    Write-Host "`nSkipped:" -ForegroundColor Yellow
     $SkippedDetails | ForEach-Object { Write-Host "   • $_" -ForegroundColor Gray }
 }
 
 if ($FailedDetails.Count -gt 0) {
-    Write-Host "`n❌ Failed:" -ForegroundColor Red
+    Write-Host "`n[ERROR] Failed:" -ForegroundColor Red
     $FailedDetails | ForEach-Object { Write-Host "   • $_" -ForegroundColor Gray }
 }
 
@@ -447,18 +447,18 @@ $($FailedDetails -join "`n")
 "@
 
 $logContent | Out-File -FilePath $LogFile -Encoding utf8
-Write-Host "`n📄 Log saved: $LogFile" -ForegroundColor Gray
+Write-Host "`n(log) Log saved: $LogFile" -ForegroundColor Gray
 
 # ── Exit ──────────────────────────────────────────────────────────────────────
 if ($FailureCount -eq 0 -and $SkippedCount -eq 0) {
-    Write-Host "`n✅ All classic pipelines rewired successfully" -ForegroundColor Green
+    Write-Host "`nAll classic pipelines rewired successfully" -ForegroundColor Green
     exit 0
 } elseif ($FailureCount -eq 0) {
-    Write-Host "`n✅ Rewiring completed ($SkippedCount skipped)" -ForegroundColor Green
+    Write-Host "`nRewiring completed ($SkippedCount skipped)" -ForegroundColor Green
     Write-Host "##vso[task.complete result=SucceededWithIssues]Rewiring completed with $SkippedCount skipped"
     exit 0
 } else {
-    Write-Host "`n⚠️  Rewiring completed with issues: $SuccessCount succeeded, $SkippedCount skipped, $FailureCount failed" -ForegroundColor Yellow
+    Write-Host "`nWARNING: Rewiring completed with issues: $SuccessCount succeeded, $SkippedCount skipped, $FailureCount failed" -ForegroundColor Yellow
     Write-Host "##[warning]$FailureCount pipeline(s) failed rewiring"
     Write-Host "##vso[task.complete result=SucceededWithIssues]$SuccessCount succeeded, $SkippedCount skipped, $FailureCount failed"
     exit 0
