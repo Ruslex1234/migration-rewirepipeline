@@ -484,34 +484,62 @@ When `ado2gh generate-script --generate-archive-data` produces a `repos.csv`, it
 
 | Column added | Default value | Notes |
 |---|---|---|
-| `github_org` | *(blank)* | Fill in your GitHub organization name before running the migration |
-| `github_repo` | Copied from column C | The third column of the CSV is used as the GitHub repository name |
-| `gh_repo_visibility` | `private` | Set to `private` for all rows |
+| `github_org` | *(blank)* | Set with `--github-org` / `-GitHubOrg`, or fill in manually after running |
+| `github_repo` | Copied from column C | Prefix/suffix can be applied via `--github-repo-prefix` / `--github-repo-suffix` |
+| `gh_repo_visibility` | `private` | Override with `--visibility` / `-Visibility` |
 
 The file is overwritten safely using a temp file. Running the script a second time on an already-augmented file is safe — it detects the columns are already present and exits without making changes.
+
+#### Options
+
+| Bash flag | PowerShell parameter | Default | Description |
+|---|---|---|---|
+| `--csv` | `-CsvFile` | `repos.csv` next to the script | Path to the CSV file to augment |
+| `--visibility` | `-Visibility` | `private` | Value for `gh_repo_visibility`. Must be `private`, `public`, or `internal` (all lowercase). Use `off` to leave the field blank |
+| `--github-org` | `-GitHubOrg` | *(blank)* | Value written to `github_org` for every row |
+| `--github-repo-prefix` | `-GitHubRepoPrefix` | *(none)* | Text prepended to the column C value for `github_repo` |
+| `--github-repo-suffix` | `-GitHubRepoSuffix` | *(none)* | Text appended to the column C value for `github_repo` |
+
+> **Visibility validation:** The `--visibility` / `-Visibility` value must be exactly `private`, `public`, `internal`, or `off` — all lowercase. Passing a mixed-case value like `Private` will error with a suggestion to use the lowercase form.
 
 #### Linux / macOS — Bash
 
 ```bash
 chmod +x scripts/augment-repos-csv.sh
 
-# Default: reads/writes repos.csv in the scripts/ folder
+# Default: private visibility, blank github_org, repo name = column C
 ./scripts/augment-repos-csv.sh
 
-# Custom file path
-./scripts/augment-repos-csv.sh --csv /path/to/repos.csv
+# Set all options at once
+./scripts/augment-repos-csv.sh \
+  --csv /path/to/repos.csv \
+  --github-org my-gh-org \
+  --visibility internal \
+  --github-repo-prefix migrated- \
+  --github-repo-suffix -prod
+
+# Leave visibility blank (fill in later)
+./scripts/augment-repos-csv.sh --visibility off
 ```
 
 #### Windows / macOS / Linux — PowerShell
 
 ```powershell
-# Default: reads/writes repos.csv in the scripts/ folder
+# Default: private visibility, blank github_org, repo name = column C
 .\scripts\augment-repos-csv.ps1
 
-# Custom file path
-.\scripts\augment-repos-csv.ps1 -CsvFile C:\migration\repos.csv
+# Set all options at once
+.\scripts\augment-repos-csv.ps1 `
+  -CsvFile          C:\migration\repos.csv `
+  -GitHubOrg        my-gh-org `
+  -Visibility       internal `
+  -GitHubRepoPrefix migrated- `
+  -GitHubRepoSuffix -prod
+
+# Leave visibility blank (fill in later)
+.\scripts\augment-repos-csv.ps1 -Visibility off
 ```
 
 #### After running
 
-Open `repos.csv` and fill in the `github_org` column for each row. The `github_repo` and `gh_repo_visibility` columns are already populated and ready to use.
+If `--github-org` / `-GitHubOrg` was not specified, open `repos.csv` and fill in the `github_org` column for each row before running the migration.
