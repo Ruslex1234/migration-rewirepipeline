@@ -8,7 +8,7 @@ set -euo pipefail
 #   Reads each row from pipelines.csv, queries the Azure DevOps
 #   build/definitions API to check process.type, then routes rows to:
 #     - pipelines.csv        (YAML pipelines,    process.type = 2)
-#     - classic_pipeline.csv (Classic pipelines, process.type = 1)
+#     - classic_pipelines.csv (Classic pipelines, process.type = 1)
 #
 #   Both output files are written to the same directory as the input file.
 #   The definition ID is extracted from the 'url' column when available
@@ -33,11 +33,11 @@ set -euo pipefail
 #
 # OUTPUTS (written to the same directory as the input file)
 #   pipelines.csv        — YAML pipelines only
-#   classic_pipeline.csv — Classic pipelines only
+#   classic_pipelines.csv — Classic pipelines only
 #
 # NOTE
 #   After splitting, add the serviceConnection, github_org, github_repo, and
-#   (optionally) default_branch columns to classic_pipeline.csv before using
+#   (optionally) default_branch columns to classic_pipelines.csv before using
 #   it with batch/rewire-classicpipeline-batch.sh.
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ fi
 
 OUTPUT_DIR="$(cd "$(dirname "$INPUT_CSV")" && pwd)"
 YAML_OUT="${OUTPUT_DIR}/pipelines.csv"
-CLASSIC_OUT="${OUTPUT_DIR}/classic_pipeline.csv"
+CLASSIC_OUT="${OUTPUT_DIR}/classic_pipelines.csv"
 
 AUTH="Authorization: Basic $(printf ':%s' "$ADO_PAT" | base64 -w 0)"
 
@@ -218,7 +218,7 @@ echo -e "${GRAY}  YAML    → $YAML_OUT    (${#YAML_ROWS[@]} pipeline(s))${NC}"
 echo -e "${GRAY}  Classic → $CLASSIC_OUT (${#CLASSIC_ROWS[@]} pipeline(s))${NC}"
 
 if [[ ${#CLASSIC_ROWS[@]} -gt 0 ]]; then
-    echo -e "\n${YELLOW}Next step for classic_pipeline.csv:${NC}"
+    echo -e "\n${YELLOW}Next step for classic_pipelines.csv:${NC}"
     echo -e "${GRAY}  Add columns: serviceConnection, github_org, github_repo${NC}"
     echo -e "${GRAY}  Optional  : default_branch (defaults to 'main' if omitted)${NC}"
     echo -e "${GRAY}  Then run  : batch/rewire-classicpipeline-batch.sh${NC}"

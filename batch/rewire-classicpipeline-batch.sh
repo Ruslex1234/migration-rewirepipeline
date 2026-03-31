@@ -2,10 +2,10 @@
 set -euo pipefail
 #
 # SYNOPSIS
-#   Batch-rewires classic Azure DevOps pipelines to GitHub using classic_pipeline.csv.
+#   Batch-rewires classic Azure DevOps pipelines to GitHub using classic_pipelines.csv.
 #
 # DESCRIPTION
-#   Reads pipeline rows from classic_pipeline.csv and rewires each classic
+#   Reads pipeline rows from classic_pipelines.csv and rewires each classic
 #   (process type 1) pipeline to its corresponding GitHub repository via the
 #   Azure DevOps REST API.
 #
@@ -29,16 +29,16 @@ set -euo pipefail
 # USAGE
 #   export ADO_PAT="your-ado-pat"
 #
-#   # Default: reads classic_pipeline.csv in the same directory
+#   # Default: reads classic_pipelines.csv in the same directory
 #   ./rewire-classicpipeline-batch.sh
 #
 #   # Custom CSV path
-#   ./rewire-classicpipeline-batch.sh --csv /path/to/classic_pipeline.csv
+#   ./rewire-classicpipeline-batch.sh --csv /path/to/classic_pipelines.csv
 #
 #   # With migration status filter
 #   ./rewire-classicpipeline-batch.sh --repos-status /path/to/repos_with_status.csv
 #
-# CSV FORMAT (classic_pipeline.csv)
+# CSV FORMAT (classic_pipelines.csv)
 #   Required columns : org, teamproject, repo, pipeline, serviceConnection,
 #                      github_org, github_repo
 #   Optional columns : pipeline_id    (numeric ID; when provided, skips name lookup)
@@ -47,7 +47,7 @@ set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CSV_FILE="${SCRIPT_DIR}/classic_pipeline.csv"
+CSV_FILE="${SCRIPT_DIR}/classic_pipelines.csv"
 REPOS_STATUS_FILE=""
 REQUIRED_COLUMNS=("org" "teamproject" "repo" "serviceConnection" "github_org" "github_repo")
 PLACEHOLDER_VALUES=("your-service-connection-id" "placeholder" "TODO" "TBD" "xxx" "00000000-0000-0000-0000-000000000000")
@@ -190,17 +190,17 @@ fi
 echo -e "${GREEN}✅ ADO_PAT validated${NC}"
 
 # ── Step 2: Validate CSV file ─────────────────────────────────────────────────
-echo -e "\n${YELLOW}[Step 2/4] Validating classic_pipeline.csv...${NC}"
+echo -e "\n${YELLOW}[Step 2/4] Validating classic_pipelines.csv...${NC}"
 if [[ ! -f "$CSV_FILE" ]]; then
     echo -e "${RED}❌ ERROR: CSV file not found: $CSV_FILE${NC}"
-    echo -e "${YELLOW}   Use --csv <path> or place classic_pipeline.csv in the batch/ folder${NC}"
+    echo -e "${YELLOW}   Use --csv <path> or place classic_pipelines.csv in the batch/ folder${NC}"
     exit 1
 fi
 
 PIPELINE_COUNT=$(( $(wc -l < "$CSV_FILE") - 1 ))
 if [[ "$PIPELINE_COUNT" -le 0 ]]; then
     echo -e "${YELLOW}⚠️  No pipelines found in CSV (only header or empty file)${NC}"
-    echo -e "${GRAY}   Add pipeline rows to classic_pipeline.csv and re-run${NC}"
+    echo -e "${GRAY}   Add pipeline rows to classic_pipelines.csv and re-run${NC}"
     exit 0
 fi
 echo -e "${GREEN}✅ File loaded: $PIPELINE_COUNT pipeline(s) found${NC}"

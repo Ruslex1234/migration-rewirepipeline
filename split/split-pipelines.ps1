@@ -6,7 +6,7 @@
     Reads each row from pipelines.csv, queries the Azure DevOps
     build/definitions API to check process.type, then routes rows to:
       - pipelines.csv        (YAML pipelines,    process.type = 2)
-      - classic_pipeline.csv (Classic pipelines, process.type = 1)
+      - classic_pipelines.csv (Classic pipelines, process.type = 1)
 
     Both output files are written to the same directory as the input file.
     The definition ID is extracted from the 'url' column when available
@@ -31,11 +31,11 @@
 
 .OUTPUTS
     pipelines.csv        — YAML pipelines only        (same dir as input)
-    classic_pipeline.csv — Classic pipelines only     (same dir as input)
+    classic_pipelines.csv — Classic pipelines only     (same dir as input)
 
 .NOTES
     After splitting, add the serviceConnection, github_org, github_repo, and
-    (optionally) default_branch columns to classic_pipeline.csv before using
+    (optionally) default_branch columns to classic_pipelines.csv before using
     it with batch\rewire-classicpipeline-batch.ps1.
 #>
 
@@ -67,7 +67,7 @@ if (-not (Test-Path $CsvFile)) {
 
 $OutputDir   = Split-Path -Parent (Resolve-Path $CsvFile)
 $YamlOut     = Join-Path $OutputDir "pipelines.csv"
-$ClassicOut  = Join-Path $OutputDir "classic_pipeline.csv"
+$ClassicOut  = Join-Path $OutputDir "classic_pipelines.csv"
 
 $headers = @{
     Authorization = "Basic " + [Convert]::ToBase64String(
@@ -206,7 +206,7 @@ Write-Host "  YAML    → $YamlOut    ($($YamlRows.Count) pipeline(s))"    -Fore
 Write-Host "  Classic → $ClassicOut ($($ClassicRows.Count) pipeline(s))" -ForegroundColor Gray
 
 if ($ClassicRows.Count -gt 0) {
-    Write-Host "`nNext step for classic_pipeline.csv:" -ForegroundColor Yellow
+    Write-Host "`nNext step for classic_pipelines.csv:" -ForegroundColor Yellow
     Write-Host "  Add columns : serviceConnection, github_org, github_repo" -ForegroundColor Gray
     Write-Host "  Optional    : default_branch (defaults to 'main' if omitted)" -ForegroundColor Gray
     Write-Host "  Then run    : batch\rewire-classicpipeline-batch.ps1"   -ForegroundColor Gray
